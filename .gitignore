@@ -1,0 +1,54 @@
+# 依赖文件
+node_modules/
+package-lock.json
+
+# 编译输出
+dist/
+*.exe
+*.dmg
+*.pkg
+
+# 数据库配置（敏感信息）
+server/config/database.json
+database.json
+
+# 上传文件
+uploads/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志文件
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+
+# 测试文件
+server/check-db-structure.js
+server/test-api-response.js
+server/detailed-db-check.js
+server/public/test-api.html
+
+# 文档文件（可选）
+修复完成报告.md
+修复验证报告.md
+打包交付清单.md
+测试清单.md
+紧急修复指南-浏览器缓存.md
+问题修复说明.md
+FIX_SUMMARY.md
