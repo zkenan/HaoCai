@@ -1,0 +1,21 @@
+services:
+  app:
+    image: 192.168.20.17:5001/xapiaihaocai:2.3
+    container_name: xapiaihaocai
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "13001:3000"
+    volumes:
+      - uploads:/app/server/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/',(r)=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  uploads:
+    driver: local

@@ -1,0 +1,40 @@
+# 依赖文件
+node_modules/
+package-lock.json
+
+# 编译输出
+dist/
+build/
+*.exe
+*.tar
+*.tar.gz
+
+# 环境变量文件（敏感信息）
+.env
+.env.local
+.env.*.local
+
+# 上传文件
+uploads/
+server/uploads/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志文件
+logs/
+*.log
+npm-debug.log*
+
+# 临时文件
+*.tmp
+*.temp
+.cache/

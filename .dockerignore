@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Node.js
+node_modules
+npm-debug.log*
+
+# 构建产物
+dist
+build
+
+# 上传文件
+uploads
+
+# 环境变量文件（包含敏感信息）
+.env
+.env.local
+.env.*.local
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE配置
+.vscode
+.idea
+*.swp
+*.swo
+
+# 临时文件
+*.tmp
+*.temp
+.cache
+
+# 文档
+*.md
+LICENSE
+
+# 批处理文件
+*.bat
+*.ps1
+
+# 可执行文件
+*.exe
+*.dmg
+*.pkg
