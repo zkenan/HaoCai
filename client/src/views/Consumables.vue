@@ -16,24 +16,6 @@
             <el-icon><Plus /></el-icon>
             新增耗材
           </el-button>
-          <el-button @click="downloadTemplate">
-            <el-icon><Download /></el-icon>
-            下载模板
-          </el-button>
-          <el-upload
-            :action="uploadUrl"
-            :headers="uploadHeaders"
-            :data="{ reporter: userStore.user?.username }"
-            :on-success="handleUploadSuccess"
-            :on-error="handleUploadError"
-            accept=".xlsx,.xls"
-            :show-file-list="false"
-          >
-            <el-button>
-              <el-icon><Upload /></el-icon>
-              Excel导入
-            </el-button>
-          </el-upload>
         </div>
       </div>
 
@@ -256,11 +238,6 @@ const rules = {
   reporter: [{ required: true, message: '请输入提报人', trigger: 'blur' }]
 }
 
-const uploadUrl = '/api/consumables/batch'
-const uploadHeaders = {
-  Authorization: `Bearer ${userStore.token}`
-}
-
 const formatDate = (date) => {
   if (!date) return ''
   return new Date(date).toLocaleString('zh-CN')
@@ -392,60 +369,6 @@ const handleUndo = async () => {
   } catch (error) {
     ElMessage.error('撤销失败')
   }
-}
-
-const downloadTemplate = async () => {
-  try {
-    const response = await request.get('/files/template', {
-      responseType: 'blob'
-    })
-    // 拦截器返回完整response对象，使用response.data获取blob
-    const blob = response.data
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', '耗材导入模板.xlsx')
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    window.URL.revokeObjectURL(url)
-    ElMessage.success('下载成功')
-  } catch (error) {
-    console.error('下载模板失败:', error)
-    // 尝试从错误响应中提取blob
-    if (error.response && error.response.data instanceof Blob) {
-      const url = window.URL.createObjectURL(error.response.data)
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', '耗材导入模板.xlsx')
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
-      ElMessage.success('下载成功')
-    } else {
-      ElMessage.error('下载模板失败: ' + (error.message || '未知错误'))
-    }
-  }
-}
-
-const handleUploadSuccess = (response) => {
-  if (response.errors && response.errors.length > 0) {
-    const errorMsg = response.errors.map(e => `第${e.row}行: ${e.error}`).join('\n')
-    ElMessageBox.alert(
-      `成功导入 ${response.count} 条，失败 ${response.errors.length} 条\n\n失败详情:\n${errorMsg}`,
-      '导入结果',
-      { type: 'warning', dangerouslyUseHTMLString: false, customStyle: { whiteSpace: 'pre-wrap' } }
-    )
-  } else {
-    ElMessage.success(response.message || `成功导入 ${response.count} 条耗材记录`)
-  }
-  loadConsumables()
-}
-
-const handleUploadError = (error) => {
-  ElMessage.error('导入失败')
-  console.error('导入错误:', error)
 }
 
 onMounted(() => {

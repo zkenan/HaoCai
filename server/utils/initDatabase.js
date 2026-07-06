@@ -105,6 +105,10 @@ async function initDatabase() {
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 stock_in_id INT NOT NULL COMMENT '入库单ID',
                 consumable_id INT NOT NULL COMMENT '耗材ID',
+                consumable_name VARCHAR(100) COMMENT '耗材名称',
+                spec_model VARCHAR(200) DEFAULT '' COMMENT '规格型号',
+                unit VARCHAR(20) DEFAULT '个' COMMENT '单位',
+                reporter VARCHAR(50) DEFAULT '' COMMENT '提报人',
                 quantity INT NOT NULL COMMENT '入库数量',
                 unit_price DECIMAL(10, 2) NOT NULL COMMENT '入库单价',
                 total_price DECIMAL(12, 2) NOT NULL COMMENT '入库总价',
@@ -183,6 +187,25 @@ async function initDatabase() {
               }
             } catch (e) {
               logger.error('升级consumables表失败', { error: e.message })
+            }
+
+            // 自动升级：stock_in_items 增加耗材信息快照字段
+            try {
+              const stockInFields = [
+                { name: 'consumable_name', def: "VARCHAR(100) COMMENT '耗材名称'" },
+                { name: 'spec_model', def: "VARCHAR(200) DEFAULT '' COMMENT '规格型号'" },
+                { name: 'unit', def: "VARCHAR(20) DEFAULT '个' COMMENT '单位'" },
+                { name: 'reporter', def: "VARCHAR(50) DEFAULT '' COMMENT '提报人'" }
+              ]
+              for (const field of stockInFields) {
+                const col = await executeQuery(connection, `SHOW COLUMNS FROM stock_in_items LIKE '${field.name}'`)
+                if (col.length === 0) {
+                  logger.info(`  升级: 添加 stock_in_items.${field.name} 列`)
+                  await executeQuery(connection, `ALTER TABLE stock_in_items ADD COLUMN ${field.name} ${field.def}`)
+                }
+              }
+            } catch (e) {
+              logger.error('升级stock_in_items表失败', { error: e.message })
             }
 
             // 检查 operation_logs 表是否存在

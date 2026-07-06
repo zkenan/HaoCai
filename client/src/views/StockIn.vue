@@ -95,9 +95,9 @@
       title="创建入库单"
       width="90%"
     >
-      <el-form 
-        :model="formData" 
-        :rules="rules" 
+      <el-form
+        :model="formData"
+        :rules="rules"
         ref="formRef"
         label-position="top"
       >
@@ -131,124 +131,117 @@
         <el-form-item label="库房负责人" prop="warehouse_manager">
           <el-input v-model="formData.warehouse_manager" placeholder="请输入库房负责人" />
         </el-form-item>
-        
-        <el-divider>选择耗材</el-divider>
-        
-        <div class="consumable-select-container">
-          <!-- 可选耗材 -->
-          <div class="panel top-panel">
-            <div class="panel-header">
-              <span>可选耗材</span>
-              <el-input
-                v-model="availableSearch"
-                placeholder="搜索耗材..."
-                size="small"
-                clearable
-                prefix-icon="Search"
-              />
-            </div>
-            <div class="panel-body">
-              <el-table
-                :data="filteredAvailableConsumables"
-                height="250"
-                border
-                @row-click="addToSelected"
-                highlight-current-row
-              >
-                <el-table-column prop="product_code" label="产品编号" width="158" />
-                <el-table-column prop="name" label="耗材名称" width="293" show-overflow-tooltip />
-                <el-table-column prop="spec_model" label="规格型号" width="293" show-overflow-tooltip />
-                <el-table-column prop="quantity" label="数量" width="108" />
-                <el-table-column label="单价" width="108">
-                  <template #default="scope">
-                    ¥{{ Number(scope.row.unit_price || 0).toFixed(2) }}
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="113">
-                  <template #default="scope">
-                    <el-button
-                      type="primary"
-                      size="small"
-                      :disabled="isAlreadySelected(scope.row.id)"
-                      @click="addToSelected(scope.row)"
-                    >
-                      添加
-                    </el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-              <div class="panel-footer">
-                <span>共 {{ filteredAvailableConsumables.length }} 项</span>
-              </div>
-            </div>
-          </div>
 
-          <!-- 已选耗材 -->
-          <div class="panel bottom-panel">
-            <div class="panel-header">
-              <span>已选耗材 ({{ selectedItems.length }})</span>
-            </div>
-            <div class="panel-body">
-              <el-table
-                :data="selectedItems"
-                height="250"
-                border
+        <el-divider>耗材明细</el-divider>
+
+        <!-- 操作按钮区 -->
+        <div class="items-toolbar">
+          <el-button type="primary" size="small" @click="addManualItem">
+            <el-icon><Plus /></el-icon> 手动添加
+          </el-button>
+          <el-upload
+            :action="uploadUrl"
+            :headers="uploadHeaders"
+            :show-file-list="false"
+            :on-success="handleExcelSuccess"
+            :on-error="handleExcelError"
+            accept=".xlsx,.xls"
+          >
+            <el-button size="small" type="success">
+              <el-icon><Upload /></el-icon> Excel导入
+            </el-button>
+          </el-upload>
+          <el-button size="small" @click="downloadTemplate">
+            <el-icon><Download /></el-icon> 下载模板
+          </el-button>
+        </div>
+
+        <!-- 已选耗材表格 -->
+        <el-table
+          :data="selectedItems"
+          border
+          style="width: 100%; margin-top: 12px"
+          max-height="400"
+        >
+          <el-table-column type="index" label="序号" width="60" />
+          <el-table-column label="耗材名称" min-width="160">
+            <template #default="scope">
+              <el-input
+                v-model="scope.row.consumable_name"
+                size="small"
+                placeholder="请输入名称"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="规格型号" min-width="160">
+            <template #default="scope">
+              <el-input
+                v-model="scope.row.spec_model"
+                size="small"
+                placeholder="请输入规格"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="单位" width="90">
+            <template #default="scope">
+              <el-input
+                v-model="scope.row.unit"
+                size="small"
+                placeholder="个"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="数量" width="120">
+            <template #default="scope">
+              <el-input-number
+                v-model="scope.row.quantity"
+                :min="1"
+                size="small"
+                controls-position="right"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="单价(元)" width="140">
+            <template #default="scope">
+              <el-input-number
+                v-model="scope.row.unit_price"
+                :min="0"
+                :precision="2"
+                size="small"
+                controls-position="right"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="小计" width="110">
+            <template #default="scope">
+              ¥{{ (scope.row.quantity * scope.row.unit_price).toFixed(2) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="提报人" width="120">
+            <template #default="scope">
+              <el-input
+                v-model="scope.row.reporter"
+                size="small"
+                placeholder="提报人"
+              />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="80" fixed="right">
+            <template #default="scope">
+              <el-button
+                type="danger"
+                size="small"
+                link
+                @click="removeItem(scope.$index)"
               >
-                <el-table-column prop="product_code" label="产品编号" min-width="108" />
-                <el-table-column prop="name" label="耗材名称" min-width="108" show-overflow-tooltip />
-                <el-table-column prop="spec_model" label="规格型号" min-width="108" show-overflow-tooltip />
-                <el-table-column label="入库数量" min-width="128">
-                  <template #default="scope">
-                    <el-input-number
-                      v-model="scope.row.quantity"
-                      :min="1"
-                      size="small"
-                      @change="calculateTotal"
-                    />
-                  </template>
-                </el-table-column>
-                <el-table-column label="单价" width="166">
-                  <template #default="scope">
-                    <el-input-number
-                      v-model="scope.row.unit_price"
-                      :min="0"
-                      :precision="2"
-                      size="small"
-                      @change="calculateTotal"
-                    />
-                  </template>
-                </el-table-column>
-                <el-table-column label="小计" min-width="98">
-                  <template #default="scope">
-                    ¥{{ (scope.row.quantity * scope.row.unit_price).toFixed(2) }}
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="136">
-                  <template #default="scope">
-                    <el-button
-                      type="danger"
-                      size="small"
-                      @click="removeFromSelected(scope.row.id)"
-                    >
-                      移除
-                    </el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-              <div class="panel-footer" v-if="selectedItems.length > 0">
-                <el-button
-                  type="danger"
-                  size="small"
-                  @click="clearAllSelected"
-                >
-                  清空全部
-                </el-button>
-              </div>
-              <div class="panel-footer empty-footer" v-else>
-                <span>暂无已选耗材</span>
-              </div>
-            </div>
-          </div>
+                移除
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div class="empty-items-tip" v-if="selectedItems.length === 0">
+          暂无耗材，请点击"手动添加"或"Excel导入"
         </div>
 
         <div class="total-amount">
@@ -283,8 +276,8 @@
           <el-descriptions-item label="创建人">{{ detailData.created_by_name }}</el-descriptions-item>
         </el-descriptions>
 
-        <el-table 
-          :data="detailData.items" 
+        <el-table
+          :data="detailData.items"
           style="width: 100%; margin-top: 20px"
           border
         >
@@ -311,6 +304,47 @@
         <el-button type="primary" @click="downloadPDF(detailData)">打印入库单</el-button>
       </template>
     </el-dialog>
+
+    <!-- 二次确认删除对话框 -->
+    <el-dialog
+      v-model="deleteConfirmVisible"
+      title="二次确认删除"
+      width="480px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+    >
+      <div style="margin-bottom: 12px; color: #ef4444; font-weight: 600;">
+        此操作不可撤销！将删除以下内容：
+      </div>
+      <ul style="margin: 0 0 16px 20px; color: #64748b; font-size: 13px; line-height: 2;">
+        <li>入库单及其明细</li>
+        <li>关联的耗材记录</li>
+        <li>引用这些耗材的出库单</li>
+      </ul>
+      <div v-if="deleteConfirmBatch" style="color: #0f172a; margin-bottom: 8px;">
+        将删除 <strong>{{ selectedRows.length }}</strong> 条入库单，请输入 <code style="background:#fee2e2;padding:2px 6px;border-radius:4px;color:#dc2626;">确认删除</code> 继续：
+      </div>
+      <div v-else style="color: #0f172a; margin-bottom: 8px;">
+        请输入入库单号 <code style="background:#fee2e2;padding:2px 6px;border-radius:4px;color:#dc2626;">{{ deleteConfirmRecord?.record_code }}</code> 确认删除：
+      </div>
+      <el-input
+        v-model="deleteConfirmInput"
+        placeholder="请输入确认文字"
+        @keyup.enter="confirmDeleteInput === (deleteConfirmBatch ? '确认删除' : deleteConfirmRecord?.record_code) && executeDelete()"
+      />
+      <template #footer>
+        <el-button @click="deleteConfirmVisible = false">取消</el-button>
+        <el-button
+          type="danger"
+          :disabled="deleteConfirmInput !== (deleteConfirmBatch ? '确认删除' : deleteConfirmRecord?.record_code)"
+          :loading="deleteConfirmLoading"
+          @click="executeDelete"
+        >
+          确认删除
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -335,25 +369,111 @@ const pageSize = ref(20)
 const formRef = ref(null)
 const selectedRows = ref([])
 
+// 二次确认删除
+const deleteConfirmVisible = ref(false)
+const deleteConfirmInput = ref('')
+const deleteConfirmRecord = ref(null) // 当前待删除的入库单
+const deleteConfirmBatch = ref(false) // 是否批量删除
+const deleteConfirmLoading = ref(false)
+
+// Excel 上传配置
+const uploadUrl = '/api/stock-in/parse-excel'
+const uploadHeaders = computed(() => ({
+  Authorization: `Bearer ${localStorage.getItem('token')}`
+}))
+
 const handleSelectionChange = (val) => {
   selectedRows.value = val
 }
 
 const handleBatchDelete = async () => {
   try {
-    await ElMessageBox.confirm(`确定要删除选中的${selectedRows.value.length}条入库单吗？删除后耗材库存将恢复。`, '提示', {
-      type: 'warning'
-    })
-
-    const ids = selectedRows.value.map(row => row.id)
-    await request.post('/stock-in/batch-delete', { ids })
-    ElMessage.success('批量删除成功')
-    selectedRows.value = []
-    loadStockInRecords()
-  } catch (error) {
-    if (error !== 'cancel') {
+    await ElMessageBox.confirm(
+      `确定要删除选中的${selectedRows.value.length}条入库单吗？`,
+      '删除入库单',
+      {
+        confirmButtonText: '是，删除库存数据',
+        cancelButtonText: '否，保留库存数据',
+        type: 'warning',
+        distinguishCancelAndClose: true
+      }
+    )
+    // 用户点击"是" → 弹出二次确认
+    deleteConfirmBatch.value = true
+    deleteConfirmRecord.value = null
+    deleteConfirmInput.value = ''
+    deleteConfirmVisible.value = true
+  } catch (action) {
+    if (action === 'cancel') {
+      // 用户点击"否，保留库存数据"
+      const ids = selectedRows.value.map(row => row.id)
+      try {
+        await request.post('/stock-in/batch-delete', { ids, deleteStock: false })
+        ElMessage.success('批量删除成功，库存数据已保留')
+        selectedRows.value = []
+        loadStockInRecords()
+      } catch (error) {
+        ElMessage.error('批量删除失败')
+      }
+    } else if (action !== 'close') {
       ElMessage.error('批量删除失败')
     }
+  }
+}
+
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除该入库单吗？',
+      '删除入库单',
+      {
+        confirmButtonText: '是，删除库存数据',
+        cancelButtonText: '否，保留库存数据',
+        type: 'warning',
+        distinguishCancelAndClose: true
+      }
+    )
+    // 用户点击"是" → 弹出二次确认
+    deleteConfirmBatch.value = false
+    deleteConfirmRecord.value = row
+    deleteConfirmInput.value = ''
+    deleteConfirmVisible.value = true
+  } catch (action) {
+    if (action === 'cancel') {
+      // 用户点击"否，保留库存数据"
+      try {
+        await request.delete(`/stock-in/${row.id}?deleteStock=false`)
+        ElMessage.success('删除成功，库存数据已保留')
+        loadStockInRecords()
+      } catch (error) {
+        ElMessage.error('删除失败')
+      }
+    } else if (action !== 'close') {
+      ElMessage.error('删除失败')
+    }
+  }
+}
+
+// 二次确认：执行删除
+const executeDelete = async () => {
+  deleteConfirmLoading.value = true
+  try {
+    if (deleteConfirmBatch.value) {
+      const ids = selectedRows.value.map(row => row.id)
+      await request.post('/stock-in/batch-delete', { ids, deleteStock: true })
+      ElMessage.success('批量删除成功，库存数据已清除')
+      selectedRows.value = []
+    } else {
+      const row = deleteConfirmRecord.value
+      await request.delete(`/stock-in/${row.id}?deleteStock=true`)
+      ElMessage.success('删除成功，库存数据已清除')
+    }
+    deleteConfirmVisible.value = false
+    loadStockInRecords()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || '删除失败')
+  } finally {
+    deleteConfirmLoading.value = false
   }
 }
 
@@ -367,50 +487,12 @@ const formData = reactive({
 })
 
 const selectedItems = ref([])
-const availableConsumables = ref([])
-const availableSearch = ref('')
-
-const filteredAvailableConsumables = computed(() => {
-  const list = availableSearch.value
-    ? availableConsumables.value.filter(item => {
-        const keyword = availableSearch.value.toLowerCase()
-        return item.name.toLowerCase().includes(keyword) ||
-          item.product_code.toLowerCase().includes(keyword) ||
-          item.spec_model.toLowerCase().includes(keyword)
-      })
-    : availableConsumables.value
-  return list
-})
-
-const isAlreadySelected = (id) => {
-  return selectedItems.value.some(item => item.id === id)
-}
-
-const addToSelected = (row) => {
-  if (!isAlreadySelected(row.id)) {
-    selectedItems.value.push({
-      ...row,
-      quantity: row.quantity || 1,
-      unit_price: row.unit_price
-    })
-  }
-}
-
-const removeFromSelected = (id) => {
-  selectedItems.value = selectedItems.value.filter(item => item.id !== id)
-}
-
-const clearAllSelected = () => {
-  selectedItems.value = []
-}
 
 const rules = {
   supplier_name: [{ required: true, message: '请输入供货商名称', trigger: 'blur' }],
   delivery_person: [{ required: true, message: '请输入送货人', trigger: 'blur' }],
   warehouse_manager: [{ required: true, message: '请输入库房负责人', trigger: 'blur' }]
 }
-
-
 
 const totalAmount = computed(() => {
   return selectedItems.value.reduce((sum, item) => {
@@ -476,7 +558,7 @@ const loadStockInRecords = async () => {
     if (searchKeyword.value) {
       params.keyword = searchKeyword.value
     }
-    
+
     const response = await request.get('/stock-in', { params })
     tableData.value = response.data
     total.value = response.total
@@ -484,17 +566,6 @@ const loadStockInRecords = async () => {
     ElMessage.error('加载入库单列表失败')
   } finally {
     loading.value = false
-  }
-}
-
-const loadConsumables = async () => {
-  try {
-    const response = await request.get('/consumables', {
-      params: { page: 1, limit: 1000 }
-    })
-    availableConsumables.value = response.data
-  } catch (error) {
-    ElMessage.error('加载耗材列表失败')
   }
 }
 
@@ -511,27 +582,94 @@ const showCreateDialog = () => {
   dialogVisible.value = true
 }
 
-const calculateTotal = () => {
-  // 计算总金额
+// 手动添加空耗材行
+const addManualItem = () => {
+  selectedItems.value.push({
+    consumable_name: '',
+    spec_model: '',
+    unit: '个',
+    quantity: 1,
+    unit_price: 0,
+    reporter: userStore.user?.username || ''
+  })
+}
+
+// Excel 导入成功回调
+const handleExcelSuccess = (response) => {
+  if (response.data && response.data.length > 0) {
+    response.data.forEach(item => {
+      selectedItems.value.push({
+        consumable_name: item.consumable_name || '',
+        spec_model: item.spec_model || '',
+        unit: item.unit || '个',
+        quantity: item.quantity || 1,
+        unit_price: item.unit_price || 0,
+        reporter: item.reporter || userStore.user?.username || ''
+      })
+    })
+    ElMessage.success(`成功导入 ${response.data.length} 条耗材`)
+  } else {
+    ElMessage.warning('Excel中没有有效数据')
+  }
+}
+
+const handleExcelError = () => {
+  ElMessage.error('Excel导入失败')
+}
+
+// 下载模板
+const downloadTemplate = async () => {
+  try {
+    const token = localStorage.getItem('token')
+    const response = await fetch('/api/files/template', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    if (!response.ok) throw new Error('下载失败')
+    const blob = await response.blob()
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = '耗材导入模板.xlsx'
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch (error) {
+    ElMessage.error('下载模板失败')
+  }
+}
+
+// 移除耗材行
+const removeItem = (index) => {
+  selectedItems.value.splice(index, 1)
 }
 
 const handleSubmit = async () => {
   if (!formRef.value) return
-  
+
   await formRef.value.validate(async (valid) => {
     if (!valid) return
-    
+
     if (selectedItems.value.length === 0) {
-      ElMessage.warning('请选择耗材')
+      ElMessage.warning('请添加耗材')
       return
+    }
+
+    // 校验每行耗材名称
+    for (let i = 0; i < selectedItems.value.length; i++) {
+      if (!selectedItems.value[i].consumable_name || !selectedItems.value[i].consumable_name.trim()) {
+        ElMessage.warning(`第 ${i + 1} 行耗材名称不能为空`)
+        return
+      }
     }
 
     submitLoading.value = true
     try {
       const items = selectedItems.value.map(item => ({
-        consumable_id: item.id,
+        consumable_name: item.consumable_name.trim(),
+        spec_model: item.spec_model || '',
+        unit: item.unit || '个',
         quantity: item.quantity,
-        unit_price: item.unit_price
+        unit_price: item.unit_price,
+        reporter: item.reporter || ''
       }))
 
       await request.post('/stock-in', {
@@ -594,7 +732,7 @@ const downloadPDF = async (row) => {
 <html>
 <head>
   <meta charset="utf-8">
-  <title>入库单_${esc(record.record_code)}</title>
+  <title>耗材入库单_${esc(record.record_code)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -619,8 +757,10 @@ const downloadPDF = async (row) => {
       color: #1a1a1a;
     }
     .print-header .sub-title {
-      font-size: 13px;
-      color: #666;
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a1a1a;
+      letter-spacing: 4px;
       margin-top: 5px;
     }
 
@@ -732,7 +872,7 @@ const downloadPDF = async (row) => {
 <body>
   <div class="container">
     <div class="print-header">
-      <h1>入库单</h1>
+      <h1>耗材入库单</h1>
       <div class="sub-title">人工智能学院实习实训教研室</div>
     </div>
 
@@ -893,27 +1033,8 @@ const downloadPDF = async (row) => {
   }
 }
 
-const handleDelete = async (row) => {
-  try {
-    await ElMessageBox.confirm('确定要删除该入库单吗？删除后耗材库存将恢复。', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    
-    await request.delete(`/stock-in/${row.id}`)
-    ElMessage.success('删除成功')
-    loadStockInRecords()
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('删除失败')
-    }
-  }
-}
-
 onMounted(() => {
   loadStockInRecords()
-  loadConsumables()
 })
 </script>
 
@@ -1010,56 +1131,17 @@ onMounted(() => {
   color: #3b82f6;
 }
 
-/* 耗材选择容器 */
-.consumable-select-container {
+.items-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin: 16px 0;
-}
-
-.panel {
-  width: 100%;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #fff;
-}
-
-.panel-header {
-  display: flex;
+  gap: 10px;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #0f172a;
 }
 
-.panel-header .el-input {
-  width: 180px;
-}
-
-.panel-body {
-  padding: 0;
-}
-
-.panel-footer {
-  padding: 12px 16px;
-  background: #f8fafc;
-  border-top: 1px solid #e2e8f0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 13px;
-  color: #64748b;
-}
-
-.panel-footer.empty-footer {
-  justify-content: center;
+.empty-items-tip {
+  text-align: center;
+  padding: 24px;
   color: #94a3b8;
+  font-size: 14px;
 }
 
 .detail-content {
@@ -1080,10 +1162,6 @@ onMounted(() => {
   width: 100%;
 }
 
-:deep(.el-transfer) {
-  --el-transfer-panel-width: 200px;
-}
-
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -1096,11 +1174,5 @@ onMounted(() => {
 .empty-state p {
   margin: 12px 0;
   font-size: 14px;
-}
-
-@media (max-width: 1400px) {
-  .consumable-select-container {
-    flex-direction: column;
-  }
 }
 </style>

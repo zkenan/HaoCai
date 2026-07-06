@@ -1,18 +1,89 @@
 const express = require('express')
+const multer = require('multer')
+const XLSX = require('xlsx')
 const { validationResult } = require('express-validator')
+
+const path = require('path')
+const fs = require('fs')
 
 const logger = require('../utils/logger')
 const db = require('../config/db')
 const { authenticate } = require('../middleware/auth')
-const { generateStockInCode } = require('../utils/codeGenerator')
+const { generateStockInCode, generateProductCode } = require('../utils/codeGenerator')
 const { createStockIn } = require('../validations')
 
 const router = express.Router()
 router.use(authenticate)
 
+// 配置临时文件上传（用于 Excel 解析）
+const uploadDir = path.join(process.cwd(), 'uploads')
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true })
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase()
+    if (ext === '.xlsx' || ext === '.xls') {
+      cb(null, true)
+    } else {
+      cb(new Error('只支持Excel文件格式(.xlsx, .xls)'))
+    }
+  }
+})
+
+/**
+ * 解析上传的 Excel 文件，返回耗材列表（不写入数据库）
+ * POST /api/stock-in/parse-excel
+ */
+router.post('/parse-excel', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: '请上传Excel文件' })
+  }
+
+  try {
+    const workbook = XLSX.readFile(req.file.path)
+    const sheetName = workbook.SheetNames[0]
+    const worksheet = workbook.Sheets[sheetName]
+    const data = XLSX.utils.sheet_to_json(worksheet)
+
+    if (data.length === 0) {
+      fs.unlinkSync(req.file.path)
+      return res.status(400).json({ message: 'Excel文件为空' })
+    }
+
+    const items = data.map((row, index) => ({
+      consumable_name: row['名称'] || row['name'] || '',
+      spec_model: row['规格型号'] || row['spec_model'] || '',
+      quantity: parseInt(row['数量'] || row['quantity'] || 0),
+      unit: row['单位'] || row['unit'] || '个',
+      unit_price: parseFloat(row['单价'] || row['unit_price'] || 0),
+      reporter: row['提报人'] || row['reporter'] || req.user?.username || ''
+    }))
+
+    // 删除临时文件
+    fs.unlinkSync(req.file.path)
+
+    logger.info('解析入库Excel', { count: items.length })
+    res.json({ message: '解析成功', data: items })
+  } catch (error) {
+    logger.error('解析Excel失败', { error: error.message, stack: error.stack })
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path)
+    }
+    res.status(500).json({ message: '解析Excel失败' })
+  }
+})
+
 /**
  * 创建入库单
  * POST /api/stock-in
+ * items 中每项: { consumable_id?, consumable_name, spec_model?, unit?, quantity, unit_price, reporter? }
  */
 router.post('/', createStockIn, (req, res, next) => {
   const errors = validationResult(req)
@@ -22,14 +93,14 @@ router.post('/', createStockIn, (req, res, next) => {
   next()
 }, async (req, res) => {
   try {
-    const { 
-      supplier_name, 
-      supplier_address, 
-      contact_phone, 
+    const {
+      supplier_name,
+      supplier_address,
+      contact_phone,
       contact_person,
-      delivery_person, 
+      delivery_person,
       warehouse_manager,
-      items // [{consumable_id, quantity, unit_price}]
+      items
     } = req.body
 
     // 生成入库单号
@@ -45,14 +116,14 @@ router.post('/', createStockIn, (req, res, next) => {
 
     // 开启事务
     const connection = await db.pool.promise().getConnection()
-    
+
     try {
       await connection.beginTransaction()
 
       // 插入入库单
       const recordSql = `
-        INSERT INTO stock_in_records 
-        (record_code, supplier_name, supplier_address, contact_phone, contact_person, 
+        INSERT INTO stock_in_records
+        (record_code, supplier_name, supplier_address, contact_phone, contact_person,
          delivery_person, warehouse_manager, stock_in_date, total_amount, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
@@ -72,28 +143,49 @@ router.post('/', createStockIn, (req, res, next) => {
 
       const stockInId = recordResult[0].insertId
 
-      // 插入入库单明细并更新耗材库存
+      // 插入入库单明细，并创建/更新耗材
       for (const item of items) {
-        // 插入明细
+        let consumableId = item.consumable_id
+
+        if (!consumableId) {
+          // 新建耗材（传入事务连接，确保批量时不生成重复编号）
+          const productCode = await generateProductCode(0, connection)
+          const insertSql = `
+            INSERT INTO consumables (product_code, name, spec_model, quantity, unit, unit_price, reporter, is_deleted)
+            VALUES (?, ?, ?, 0, ?, ?, ?, 0)
+          `
+          const insertResult = await connection.execute(insertSql, [
+            productCode,
+            item.consumable_name,
+            item.spec_model || '',
+            item.unit || '个',
+            item.unit_price,
+            item.reporter || req.user?.username || ''
+          ])
+          consumableId = insertResult[0].insertId
+        }
+
+        // 插入入库单明细（包含耗材信息快照）
         const itemSql = `
-          INSERT INTO stock_in_items (stock_in_id, consumable_id, quantity, unit_price, total_price)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO stock_in_items
+          (stock_in_id, consumable_id, consumable_name, spec_model, unit, reporter, quantity, unit_price, total_price)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         await connection.execute(itemSql, [
           stockInId,
-          item.consumable_id,
+          consumableId,
+          item.consumable_name,
+          item.spec_model || '',
+          item.unit || '个',
+          item.reporter || '',
           item.quantity,
           item.unit_price,
           item.quantity * item.unit_price
         ])
 
-        // 更新耗材库存
-        const updateSql = `
-          UPDATE consumables 
-          SET quantity = quantity + ? 
-          WHERE id = ?
-        `
-        await connection.execute(updateSql, [item.quantity, item.consumable_id])
+        // 更新耗材库存（增加入库数量）
+        const updateSql = `UPDATE consumables SET quantity = quantity + ? WHERE id = ?`
+        await connection.execute(updateSql, [item.quantity, consumableId])
       }
 
       await connection.commit()
@@ -129,12 +221,12 @@ router.get('/', async (req, res) => {
     const offset = (page - 1) * limit
 
     let sql = `
-      SELECT sr.*, u.username as created_by_name 
-      FROM stock_in_records sr 
+      SELECT sr.*, u.username as created_by_name
+      FROM stock_in_records sr
       LEFT JOIN users u ON sr.created_by = u.id
     `
     let countSql = `
-      SELECT COUNT(*) as total 
+      SELECT COUNT(*) as total
       FROM stock_in_records sr
     `
     const params = []
@@ -173,24 +265,27 @@ router.get('/', async (req, res) => {
  */
 router.get('/:id', async (req, res) => {
   try {
-    // 获取入库单基本信息
     const recordSql = `
-      SELECT sr.*, u.username as created_by_name 
-      FROM stock_in_records sr 
-      LEFT JOIN users u ON sr.created_by = u.id 
+      SELECT sr.*, u.username as created_by_name
+      FROM stock_in_records sr
+      LEFT JOIN users u ON sr.created_by = u.id
       WHERE sr.id = ?
     `
     const recordResults = await db.query(recordSql, [req.params.id])
-    
+
     if (recordResults.length === 0) {
       return res.status(404).json({ message: '入库单不存在' })
     }
 
-    // 获取入库单明细
+    // 优先使用 stock_in_items 自身字段，兼容旧数据通过 COALESCE 回退到 consumables
     const itemsSql = `
-      SELECT si.*, c.product_code, c.name, c.spec_model, c.unit 
-      FROM stock_in_items si 
-      LEFT JOIN consumables c ON si.consumable_id = c.id 
+      SELECT si.*,
+        c.product_code,
+        COALESCE(si.consumable_name, c.name) as name,
+        COALESCE(si.spec_model, c.spec_model) as spec_model,
+        COALESCE(si.unit, c.unit) as unit
+      FROM stock_in_items si
+      LEFT JOIN consumables c ON si.consumable_id = c.id
       WHERE si.stock_in_id = ?
       ORDER BY si.id ASC
     `
@@ -211,10 +306,11 @@ router.get('/:id', async (req, res) => {
 /**
  * 批量删除入库单
  * POST /api/stock-in/batch-delete
+ * body: { ids: [...], deleteStock: boolean }
  */
 router.post('/batch-delete', async (req, res) => {
   try {
-    const { ids } = req.body
+    const { ids, deleteStock } = req.body
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ message: '请选择要删除的入库单' })
     }
@@ -228,19 +324,36 @@ router.post('/batch-delete', async (req, res) => {
         `SELECT * FROM stock_in_items WHERE stock_in_id IN (${placeholders})`, ids
       )
 
-      const stockUpdates = {}
-      allItems.forEach(item => {
-        stockUpdates[item.consumable_id] = (stockUpdates[item.consumable_id] || 0) + item.quantity
-      })
-      for (const [cid, qty] of Object.entries(stockUpdates)) {
-        await connection.execute('UPDATE consumables SET quantity = quantity - ? WHERE id = ? AND quantity >= ?', [qty, cid, qty])
+      // 先删除 stock_in_items（解除对 consumables 的外键引用）
+      await connection.execute(`DELETE FROM stock_in_items WHERE stock_in_id IN (${placeholders})`, ids)
+
+      if (deleteStock) {
+        const consumableIds = [...new Set(allItems.map(item => item.consumable_id))]
+        for (const cid of consumableIds) {
+          // 检查是否被其他入库单引用（此时当前入库单的 items 已删除）
+          const [otherInRefs] = await connection.execute(
+            'SELECT COUNT(*) as cnt FROM stock_in_items WHERE consumable_id = ?', [cid]
+          )
+          if (otherInRefs[0].cnt > 0) continue // 共享耗材，跳过
+
+          // 不共享，级联删除：出库单明细 → 出库单主表 → 耗材
+          const [outItems] = await connection.execute(
+            'SELECT stock_out_id FROM stock_out_items WHERE consumable_id = ?', [cid]
+          )
+          const outIds = [...new Set(outItems.map(r => r.stock_out_id))]
+          if (outIds.length > 0) {
+            const outPH = outIds.map(() => '?').join(',')
+            await connection.execute(`DELETE FROM stock_out_items WHERE stock_out_id IN (${outPH})`, outIds)
+            await connection.execute(`DELETE FROM stock_out_records WHERE id IN (${outPH})`, outIds)
+          }
+          await connection.execute('DELETE FROM consumables WHERE id = ?', [cid])
+        }
       }
 
-      await connection.execute(`DELETE FROM stock_in_items WHERE stock_in_id IN (${placeholders})`, ids)
       await connection.execute(`DELETE FROM stock_in_records WHERE id IN (${placeholders})`, ids)
 
       await connection.commit()
-      logger.info('批量删除入库单', { count: ids.length })
+      logger.info('批量删除入库单', { count: ids.length, deleteStock: !!deleteStock })
       res.json({ message: `成功删除${ids.length}条入库单` })
     } catch (error) {
       await connection.rollback()
@@ -256,45 +369,59 @@ router.post('/batch-delete', async (req, res) => {
 
 /**
  * 删除入库单
- * DELETE /api/stock-in/:id
+ * DELETE /api/stock-in/:id?deleteStock=true|false
  */
 router.delete('/:id', async (req, res) => {
   try {
-    // 获取入库单信息
     const recordSql = 'SELECT * FROM stock_in_records WHERE id = ?'
     const recordResults = await db.query(recordSql, [req.params.id])
-    
+
     if (recordResults.length === 0) {
       return res.status(404).json({ message: '入库单不存在' })
     }
 
-    // 开启事务
+    const deleteStock = req.query.deleteStock === 'true'
+    const stockInId = parseInt(req.params.id)
     const connection = await db.pool.promise().getConnection()
-    
+
     try {
       await connection.beginTransaction()
 
-      // 获取入库单明细
       const itemsSql = 'SELECT * FROM stock_in_items WHERE stock_in_id = ?'
-      const items = await connection.execute(itemsSql, [req.params.id])
+      const items = await connection.execute(itemsSql, [stockInId])
 
-      // 恢复耗材库存
-      for (const item of items[0]) {
-        const updateSql = `
-          UPDATE consumables 
-          SET quantity = quantity - ? 
-          WHERE id = ? AND quantity >= ?
-        `
-        await connection.execute(updateSql, [item.quantity, item.consumable_id, item.quantity])
+      // 先删除 stock_in_items（解除对 consumables 的外键引用）
+      await connection.execute('DELETE FROM stock_in_items WHERE stock_in_id = ?', [stockInId])
+
+      if (deleteStock) {
+        for (const item of items[0]) {
+          const cid = item.consumable_id
+
+          // 检查是否被其他入库单引用（此时当前入库单的 items 已删除）
+          const [otherInRefs] = await connection.execute(
+            'SELECT COUNT(*) as cnt FROM stock_in_items WHERE consumable_id = ?', [cid]
+          )
+          if (otherInRefs[0].cnt > 0) continue // 共享耗材，跳过
+
+          // 不共享，级联删除：出库单明细 → 出库单主表 → 耗材
+          const [outItems] = await connection.execute(
+            'SELECT stock_out_id FROM stock_out_items WHERE consumable_id = ?', [cid]
+          )
+          const outIds = [...new Set(outItems.map(r => r.stock_out_id))]
+          if (outIds.length > 0) {
+            const outPH = outIds.map(() => '?').join(',')
+            await connection.execute(`DELETE FROM stock_out_items WHERE stock_out_id IN (${outPH})`, outIds)
+            await connection.execute(`DELETE FROM stock_out_records WHERE id IN (${outPH})`, outIds)
+          }
+          await connection.execute('DELETE FROM consumables WHERE id = ?', [cid])
+        }
       }
 
-      // 删除入库单(级联删除明细)
-      const deleteSql = 'DELETE FROM stock_in_records WHERE id = ?'
-      await connection.execute(deleteSql, [req.params.id])
+      await connection.execute('DELETE FROM stock_in_records WHERE id = ?', [stockInId])
 
       await connection.commit()
 
-      logger.info('删除入库单', { id: req.params.id })
+      logger.info('删除入库单', { id: req.params.id, deleteStock })
       res.json({ message: '删除成功' })
     } catch (error) {
       await connection.rollback()

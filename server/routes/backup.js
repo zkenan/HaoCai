@@ -58,7 +58,7 @@ router.get('/export', async (req, res) => {
     for (const tableName of tables) {
       let rows
       if (tableName === 'users') {
-        rows = await db.query('SELECT id, username, role, created_at, updated_at FROM `users`')
+        rows = await db.query('SELECT * FROM `users`')
       } else {
         rows = await db.query(`SELECT * FROM \`${tableName}\``)
       }
@@ -67,18 +67,14 @@ router.get('/export', async (req, res) => {
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const filename = `backup_${timestamp}.json`
-    const uploadsDir = getBackupsDir()
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true })
-    }
-    const filePath = path.join(uploadsDir, filename)
-    fs.writeFileSync(filePath, JSON.stringify(backupData, null, 2), 'utf8')
-    logger.info(`备份文件已保存: ${filePath}`)
+
+    // 直接返回文件流，不经过 JSON 包装
+    const jsonStr = JSON.stringify(backupData, null, 2)
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    res.send(jsonStr)
 
     logger.info('导出备份数据', { filename })
-    res.setHeader('Content-Type', 'application/json')
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
-    res.json({ message: '导出成功', data: backupData })
   } catch (error) {
     logger.error('数据导出失败', { error: error.message, stack: error.stack })
     res.status(500).json({ message: '数据导出失败' })
@@ -106,10 +102,6 @@ router.post('/import', async (req, res) => {
     const totalRecords = Object.values(backupData.tables).reduce((sum, arr) => {
       return sum + (Array.isArray(arr) ? arr.length : 0)
     }, 0)
-
-    if (totalRecords > 10000) {
-      return res.status(400).json({ message: '备份数据量过大，最多支持10000条记录' })
-    }
 
     if (totalRecords === 0) {
       return res.status(400).json({

@@ -3,9 +3,11 @@ const db = require('../config/db')
 /**
  * 生成产品编号
  * 格式: YYMMDD + 四位序号 (例: 2605110001)
+ * @param {number} offset - 偏移量（用于批量导入时避免重复）
+ * @param {object} connection - 可选，事务连接（用于事务内生成不重复编号）
  * @returns {Promise<string>} 产品编号
  */
-const generateProductCode = async (offset = 0) => {
+const generateProductCode = async (offset = 0, connection = null) => {
   const now = new Date()
   const year = String(now.getFullYear()).slice(2)
   const month = String(now.getMonth() + 1).padStart(2, '0')
@@ -13,15 +15,17 @@ const generateProductCode = async (offset = 0) => {
   const dateStr = `${year}${month}${day}`
 
   const sql = `
-    SELECT COUNT(*) as count 
-    FROM consumables 
+    SELECT COUNT(*) as count
+    FROM consumables
     WHERE product_code LIKE ?
   `
-  
-  const results = await db.query(sql, [`${dateStr}%`])
-  const count = results[0].count + offset
+
+  const executor = connection || db
+  const results = await executor.execute(sql, [`${dateStr}%`])
+  const rows = Array.isArray(results[0]) ? results[0] : results
+  const count = rows[0].count + offset
   const sequence = String(count + 1).padStart(4, '0')
-  
+
   return `${dateStr}${sequence}`
 }
 

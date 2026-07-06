@@ -162,7 +162,7 @@
                     <el-button
                       type="primary"
                       size="small"
-                      @click="addToSelected(scope.row)"
+                      @click.stop="addToSelected(scope.row)"
                     >
                       添加
                     </el-button>
@@ -568,7 +568,7 @@ const downloadPDF = async (row) => {
 <html>
 <head>
   <meta charset="utf-8">
-  <title>出库单_${esc(record.record_code)}</title>
+  <title>耗材出库单_${esc(record.record_code)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -593,8 +593,11 @@ const downloadPDF = async (row) => {
       color: #1a1a1a;
     }
     .print-header .sub-title {
-      font-size: 13px;
-      color: #666;
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a1a1a;
+      letter-spacing: 4px;
+      margin-top: 5px;
       margin-top: 5px;
     }
 
@@ -706,7 +709,7 @@ const downloadPDF = async (row) => {
 <body>
   <div class="container">
     <div class="print-header">
-      <h1>出库单</h1>
+      <h1>耗材出库单</h1>
       <div class="sub-title">人工智能学院实习实训教研室</div>
     </div>
 

@@ -192,19 +192,21 @@ const uploadRef = ref(null)
 const handleExport = async () => {
   try {
     exporting.value = true
-    
-    const response = await api.get('/backup/export', {
-      responseType: 'blob'
+
+    const token = localStorage.getItem('token')
+    const response = await fetch('/api/backup/export', {
+      headers: { 'Authorization': `Bearer ${token}` }
     })
 
-    // 创建下载链接
-    const blob = new Blob([response.data], { type: 'application/json' })
+    if (!response.ok) throw new Error('导出失败')
+
+    const blob = await response.blob()
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    
+
     // 从响应头获取文件名
-    const contentDisposition = response.headers['content-disposition']
+    const contentDisposition = response.headers.get('content-disposition')
     let filename = `backup_${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}.json`
     if (contentDisposition) {
       const match = contentDisposition.match(/filename="(.+)"/)
@@ -212,7 +214,7 @@ const handleExport = async () => {
         filename = match[1]
       }
     }
-    
+
     link.download = filename
     document.body.appendChild(link)
     link.click()
@@ -220,12 +222,12 @@ const handleExport = async () => {
     window.URL.revokeObjectURL(url)
 
     ElMessage.success('数据导出成功')
-    
+
     // 刷新备份列表
     loadBackupList()
   } catch (error) {
     console.error('导出失败:', error)
-    ElMessage.error(error.response?.data?.message || '数据导出失败')
+    ElMessage.error('数据导出失败')
   } finally {
     exporting.value = false
   }
@@ -314,8 +316,8 @@ const loadBackupList = async () => {
   try {
     loadingList.value = true
     const response = await api.get('/backup/list')
-    // api.js 的响应拦截器已经返回了 response.data，所以这里直接取 files
-    backupList.value = response.files || []
+    // api.js 的响应拦截器已经返回了 response.data，所以这里直接取 data
+    backupList.value = response.data || []
     console.log('备份列表加载成功:', backupList.value)
   } catch (error) {
     console.error('加载备份列表失败:', error)

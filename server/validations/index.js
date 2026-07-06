@@ -25,7 +25,11 @@ const createConsumable = [
 const createStockIn = [
   body('supplier_name').trim().isLength({ min: 1, max: 200 }).withMessage('供货商名称1-200位'),
   body('items').isArray({ min: 1 }).withMessage('请选择至少一个耗材'),
-  body('items.*.consumable_id').isInt({ min: 1 }).withMessage('耗材ID无效'),
+  body('items.*.consumable_id').optional({ values: 'null' }).isInt({ min: 1 }).withMessage('耗材ID无效'),
+  body('items.*.consumable_name').trim().isLength({ min: 1, max: 100 }).withMessage('耗材名称1-100位'),
+  body('items.*.spec_model').optional().trim().isLength({ max: 200 }).withMessage('规格型号不超过200位'),
+  body('items.*.unit').optional().trim().isLength({ min: 1, max: 20 }).withMessage('单位1-20位'),
+  body('items.*.reporter').optional().trim().isLength({ max: 50 }).withMessage('提报人不超过50位'),
   body('items.*.quantity').isInt({ min: 1 }).withMessage('数量必须大于0'),
   body('items.*.unit_price').isFloat({ min: 0 }).withMessage('单价必须为非负数')
 ]

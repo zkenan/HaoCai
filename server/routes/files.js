@@ -79,11 +79,15 @@ router.get('/stock-in/:id/data', async (req, res) => {
 
     const record = recordResults[0]
 
-    // 获取入库单明细
+    // 获取入库单明细（优先使用 stock_in_items 自身字段，兼容旧数据）
     const itemsSql = `
-      SELECT si.*, c.product_code, c.name, c.spec_model, c.unit 
-      FROM stock_in_items si 
-      LEFT JOIN consumables c ON si.consumable_id = c.id 
+      SELECT si.*,
+        c.product_code,
+        COALESCE(si.consumable_name, c.name) as name,
+        COALESCE(si.spec_model, c.spec_model) as spec_model,
+        COALESCE(si.unit, c.unit) as unit
+      FROM stock_in_items si
+      LEFT JOIN consumables c ON si.consumable_id = c.id
       WHERE si.stock_in_id = ?
       ORDER BY si.id ASC
     `
