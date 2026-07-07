@@ -6,13 +6,13 @@
 
 ## 项目概况
 
-耗材出入库管理系统，面向高校实习实训教研室，支持耗材管理、出入库、库存看板、数据备份。
+耗材出入库管理系统，面向高校实习实训教研室，支持入库管理、出库管理、耗材管理、库存看板、数据备份。
 
 **技术栈**: Vue 3 + Vite + Element Plus + Pinia (前端) | Express + MySQL (后端)
 
-**部署方式**: Docker Compose (app + nginx) 连接外部MySQL数据库
+**部署方式**: Docker Compose 连接外部MySQL数据库
 
-**项目根目录**: `/home/luoqikai/mimo/XapiAiHaoCai`
+**当前版本**: v2.4.0
 
 ---
 
@@ -24,12 +24,12 @@
 | `server/config/db.js` | 数据库连接池，从.env读取配置 |
 | `server/middleware/auth.js` | JWT认证、管理员权限中间件 |
 | `server/routes/auth.js` | 登录、修改密码 |
-| `server/routes/consumables.js` | 耗材CRUD、批量导入、库存查询 |
-| `server/routes/stock-in.js` | 入库管理（事务） |
+| `server/routes/consumables.js` | 耗材CRUD、库存查询 |
+| `server/routes/stock-in.js` | 入库管理（事务+耗材创建） |
 | `server/routes/stock-out.js` | 出库管理（事务+行锁） |
-| `server/routes/backup.js` | 数据备份导出/导入（列名白名单） |
+| `server/routes/backup.js` | 数据备份导出/导入 |
 | `server/routes/files.js` | Excel模板下载、打印数据接口 |
-| `server/utils/initDatabase.js` | 自动建库建表、默认账号初始化 |
+| `server/utils/initDatabase.js` | 自动建库建表、升级 |
 | `server/utils/codeGenerator.js` | 编号生成（产品编号/入库单号/出库单号） |
 | `client/src/router/index.js` | 前端路由配置 |
 | `client/src/utils/api.js` | Axios请求封装（拦截器） |
@@ -46,7 +46,7 @@
 2. **创建分支**: `git checkout -b feature/功能名`
 3. **理解现有代码**: 读取相关文件，理解现有模式
 4. **编写代码**: 遵循 `CONVENTIONS.md` 中的代码风格
-5. **运行测试**: `cd server && node -e "require('./routes/xxx')"` 验证模块加载
+5. **运行测试**: 验证功能正常
 6. **提交代码**: 使用 Conventional Commits 格式
 7. **更新计划**: 在 `PLAN.md` 中勾选完成的任务
 
@@ -59,9 +59,9 @@
 
 ### 修改数据库表结构
 
-1. 使用Knex创建迁移文件：`npx knex migrate:make migration_name`
+1. 在 `server/migrations/` 创建迁移文件
 2. 编写 up/down 方法
-3. 本地测试：`npx knex migrate:latest`
+3. 同时更新 `server/utils/initDatabase.js` 的自动升级逻辑
 4. 提交迁移文件
 
 ---
@@ -81,7 +81,7 @@
 - 写操作（INSERT/UPDATE/DELETE）使用事务
 - 出库操作使用 `SELECT ... FOR UPDATE` 行锁
 - 批量操作使用事务包裹
-- 编号生成注意并发安全
+- 编号生成注意并发安全（传入事务连接）
 
 ### 前端规范
 
@@ -99,23 +99,23 @@
 ```
 DB_HOST=MySQL服务器地址
 DB_PORT=3306
-DB_DATABASE=xapiaihaocai
-DB_USER=aihaocai
+DB_DATABASE=aihaocai
+DB_USER=数据库用户名
 DB_PASSWORD=数据库密码
-JWT_SECRET=JWT密钥（用node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" 生成）
+JWT_SECRET=JWT密钥（用 openssl rand -hex 32 生成）
 ```
 
 ### 启动命令
 
 ```bash
-# 开发模式（前后端分离）
+# Docker部署（推荐）
+docker compose up -d
+
+# 开发模式
 npm run dev
 
 # 后端单独启动
-cd server && npm run dev
-
-# Docker部署
-./deploy-docker.sh
+cd server && node app.js
 ```
 
 ---

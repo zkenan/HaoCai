@@ -4,7 +4,7 @@
 
 - **项目名称**: 耗材出入库管理系统
 - **技术栈**: Vue 3 + Vite + Element Plus + Pinia (前端) | Node.js + Express + MySQL (后端)
-- **版本**: 2.1.0
+- **版本**: 2.4.0
 - **数据库**: 外部MySQL (通过 .env 配置连接)
 
 ---
