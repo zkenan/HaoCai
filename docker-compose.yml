@@ -1,6 +1,6 @@
 services:
   app:
-    image: 192.168.20.17:5001/xapiaihaocai:2.3
+    image: 192.168.20.17:5001/xapiaihaocai:2.4
     container_name: xapiaihaocai
     restart: always
     env_file:
