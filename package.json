@@ -1,6 +1,6 @@
 {
   "name": "xapiaihaocai",
-  "version": "2.1.0",
+  "version": "2.4.9",
   "description": "耗材出入库管理系统",
   "main": "server/app.js",
   "scripts": {

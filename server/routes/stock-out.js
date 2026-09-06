@@ -114,23 +114,38 @@ router.post('/', createStockOut, (req, res, next) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 20, keyword } = req.query
+    // 第八轮改动：新增 start_date / end_date 查询参数（前端工作台抽屉按本月筛选）
+    const { page = 1, limit = 20, keyword, start_date, end_date } = req.query
     const offset = (page - 1) * limit
 
     let sql = `
-      SELECT sr.*, u.username as created_by_name 
-      FROM stock_out_records sr 
+      SELECT sr.*, u.username as created_by_name
+      FROM stock_out_records sr
       LEFT JOIN users u ON sr.created_by = u.id
     `
     let countSql = `
-      SELECT COUNT(*) as total 
+      SELECT COUNT(*) as total
       FROM stock_out_records sr
     `
     const params = []
 
+    // 第八轮改动：以 WHERE 1=1 起始占位，便于后续 AND 拼接
+    sql += ' WHERE 1=1'
+    countSql += ' WHERE 1=1'
+
+    if (start_date) {
+      sql += ' AND sr.created_at >= ?'
+      countSql += ' AND sr.created_at >= ?'
+      params.push(`${start_date} 00:00:00`)
+    }
+    if (end_date) {
+      sql += ' AND sr.created_at <= ?'
+      countSql += ' AND sr.created_at <= ?'
+      params.push(`${end_date} 23:59:59`)
+    }
     if (keyword) {
-      sql += ' WHERE sr.record_code LIKE ? OR sr.recipient LIKE ?'
-      countSql += ' WHERE sr.record_code LIKE ? OR sr.recipient LIKE ?'
+      sql += ' AND (sr.record_code LIKE ? OR sr.recipient LIKE ?)'
+      countSql += ' AND (sr.record_code LIKE ? OR sr.recipient LIKE ?)'
       const searchParam = `%${keyword}%`
       params.push(searchParam, searchParam)
     }

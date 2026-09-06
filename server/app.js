@@ -17,6 +17,8 @@ const fileRoutes = require('./routes/files')
 const backupRoutes = require('./routes/backup')
 const userRoutes = require('./routes/users')
 const logRoutes = require('./routes/logs')
+const categoryRoutes = require('./routes/categories')
+const ownershipRoutes = require('./routes/ownerships')
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -63,6 +65,8 @@ app.use('/api/files', fileRoutes)
 app.use('/api/backup', backupRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/logs', logRoutes)
+app.use('/api/categories', categoryRoutes)
+app.use('/api/ownerships', ownershipRoutes)
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'))

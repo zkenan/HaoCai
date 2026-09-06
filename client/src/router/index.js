@@ -25,6 +25,18 @@ const routes = [
         meta: { title: '耗材管理' }
       },
       {
+        path: '/categories',
+        name: 'Categories',
+        component: () => import('../views/Categories.vue'),
+        meta: { title: '分类管理', requiresAdmin: true }
+      },
+      {
+        path: '/replenish',
+        name: 'Replenish',
+        component: () => import('../views/Replenish.vue'),
+        meta: { title: '补货建议' }
+      },
+      {
         path: '/stock-in',
         name: 'StockIn',
         component: () => import('../views/StockIn.vue'),

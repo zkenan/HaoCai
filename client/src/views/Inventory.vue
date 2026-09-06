@@ -2,7 +2,7 @@
   <div class="inventory-page">
     <!-- 统计卡片 -->
     <div class="stats-grid">
-      <div class="stat-card">
+      <div class="stat-card clickable" @click="openDistributionDrawer">
         <div class="stat-header">
           <div class="stat-icon blue">
             <el-icon><Box /></el-icon>
@@ -11,14 +11,10 @@
         <div class="stat-body">
           <div class="stat-value">{{ stats.totalTypes }}</div>
           <div class="stat-label">库存总量</div>
-          <div class="stat-trend success">
-            <el-icon><Top /></el-icon>
-            <span>较上周增长 12%</span>
-          </div>
         </div>
       </div>
-      
-      <div class="stat-card">
+
+      <div class="stat-card clickable" @click="openStockInDrawer">
         <div class="stat-header">
           <div class="stat-icon green">
             <el-icon><Upload /></el-icon>
@@ -27,14 +23,10 @@
         <div class="stat-body">
           <div class="stat-value">{{ stats.totalStockIn }}</div>
           <div class="stat-label">本月入库</div>
-          <div class="stat-trend success">
-            <el-icon><Top /></el-icon>
-            <span>较上月增长 8%</span>
-          </div>
         </div>
       </div>
-      
-      <div class="stat-card">
+
+      <div class="stat-card clickable" @click="openStockOutDrawer">
         <div class="stat-header">
           <div class="stat-icon orange">
             <el-icon><Download /></el-icon>
@@ -43,14 +35,10 @@
         <div class="stat-body">
           <div class="stat-value">{{ stats.totalStockOut }}</div>
           <div class="stat-label">本月出库</div>
-          <div class="stat-trend danger">
-            <el-icon><Bottom /></el-icon>
-            <span>较上月减少 3%</span>
-          </div>
         </div>
       </div>
       
-      <div class="stat-card">
+      <div class="stat-card alert-card" @click="openAlertDrawer">
         <div class="stat-header">
           <div class="stat-icon red">
             <el-icon><Warning /></el-icon>
@@ -139,7 +127,7 @@
             <el-icon class="icon-warning"><Warning /></el-icon>
             <span>库存预警</span>
           </div>
-          <el-button text size="small">查看全部</el-button>
+          <el-button text size="small" @click="goAlertList">查看全部</el-button>
         </div>
         <el-table 
           :data="lowStockData" 
@@ -155,7 +143,7 @@
           </el-table-column>
           <el-table-column label="安全库存">
             <template #default="scope">
-              {{ scope.row.safety_stock || 10 }} {{ scope.row.unit }}
+              {{ scope.row.safety_stock || 5 }} {{ scope.row.unit }}
             </template>
           </el-table-column>
           <el-table-column label="状态" width="100">
@@ -289,11 +277,143 @@
         />
       </div>
     </div>
+
+    <!-- 库存分布抽屉 -->
+    <el-drawer
+      v-model="distributionDrawerVisible"
+      title="库存分布明细"
+      size="480px"
+    >
+      <el-table :data="distributionData" v-loading="distributionLoading" style="width: 100%">
+        <el-table-column prop="category_name" label="分类" min-width="160" />
+        <el-table-column prop="consumable_count" label="耗材种类" width="100" align="right" />
+        <el-table-column prop="total_quantity" label="库存总数" width="100" align="right" />
+        <template #empty>
+          <div class="empty-state">
+            <el-icon :size="48" color="#cbd5e1"><Goods /></el-icon>
+            <p>暂无库存分布数据</p>
+          </div>
+        </template>
+      </el-table>
+      <div class="drawer-footer">
+        <el-button type="primary" @click="$router.push('/consumables')">查看全部耗材</el-button>
+      </div>
+    </el-drawer>
+
+    <!-- 本月入库抽屉 -->
+    <el-drawer
+      v-model="stockInDrawerVisible"
+      title="本月入库明细"
+      size="540px"
+    >
+      <div class="drawer-summary">本月共 <b>{{ stockInData.length }}</b> 单</div>
+      <el-table
+        :data="stockInData"
+        v-loading="stockInLoading"
+        @row-click="viewStockInRecord"
+        style="width: 100%"
+        row-style="cursor: pointer;"
+      >
+        <el-table-column prop="created_at" label="日期" width="160">
+          <template #default="scope">
+            {{ formatDate(scope.row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="record_code" label="单号" width="150" />
+        <el-table-column prop="supplier_name" label="供应商" min-width="120" show-overflow-tooltip />
+        <el-table-column label="操作" width="100" align="center">
+          <template #default="scope">
+            <el-button text type="primary" size="small" @click.stop="viewStockInRecord(scope.row)">查看单据</el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-state">
+            <el-icon :size="48" color="#cbd5e1"><Upload /></el-icon>
+            <p>本月暂无入库记录</p>
+          </div>
+        </template>
+      </el-table>
+      <div class="drawer-footer">
+        <el-button type="primary" @click="$router.push('/stock-in')">查看全部入库单</el-button>
+      </div>
+    </el-drawer>
+
+    <!-- 本月出库抽屉 -->
+    <el-drawer
+      v-model="stockOutDrawerVisible"
+      title="本月出库明细"
+      size="540px"
+    >
+      <div class="drawer-summary">本月共 <b>{{ stockOutData.length }}</b> 单</div>
+      <el-table
+        :data="stockOutData"
+        v-loading="stockOutLoading"
+        @row-click="viewStockOutRecord"
+        style="width: 100%"
+        row-style="cursor: pointer;"
+      >
+        <el-table-column prop="created_at" label="日期" width="160">
+          <template #default="scope">
+            {{ formatDate(scope.row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="record_code" label="单号" width="150" />
+        <el-table-column prop="recipient" label="领用人" min-width="120" show-overflow-tooltip />
+        <el-table-column label="操作" width="100" align="center">
+          <template #default="scope">
+            <el-button text type="primary" size="small" @click.stop="viewStockOutRecord(scope.row)">查看单据</el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-state">
+            <el-icon :size="48" color="#cbd5e1"><Download /></el-icon>
+            <p>本月暂无出库记录</p>
+          </div>
+        </template>
+      </el-table>
+      <div class="drawer-footer">
+        <el-button type="primary" @click="$router.push('/stock-out')">查看全部出库单</el-button>
+      </div>
+    </el-drawer>
+
+    <!-- 库存告警明细抽屉 -->
+    <el-drawer
+      v-model="alertDrawerVisible"
+      title="库存预警明细"
+      size="480px"
+    >
+      <div class="alert-drawer-toolbar">
+        <el-button type="primary" size="small" @click="goAlertList">
+          在库存列表中查看
+        </el-button>
+      </div>
+      <el-table :data="alertList" v-loading="loading" style="width: 100%">
+        <el-table-column prop="name" label="耗材名称" min-width="140" />
+        <el-table-column label="当前库存" width="90">
+          <template #default="scope">
+            <el-tag type="danger">{{ scope.row.current_stock }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="safety_stock" label="安全库存" width="90" />
+        <el-table-column label="缺口" width="80">
+          <template #default="scope">
+            {{ scope.row.need_quantity || (scope.row.safety_stock - scope.row.current_stock) }}
+          </template>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-state">
+            <el-icon :size="48" color="#cbd5e1"><Warning /></el-icon>
+            <p>暂无库存预警</p>
+          </div>
+        </template>
+      </el-table>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Box, Upload, Download, Warning, Top, Bottom, DataAnalysis, Search, Goods, DataLine } from '@element-plus/icons-vue'
 import { use } from 'echarts/core'
@@ -324,11 +444,27 @@ const lowStockData = ref([])
 const recentActivities = ref([])
 const trendData = ref({ stockIn: [], stockOut: [] })
 const trendPeriod = ref('day')
+const distributionData = ref([])
+const alertDrawerVisible = ref(false)
+const alertList = ref([])
+
+// 第八轮新增：3 个新抽屉状态与数据
+const distributionDrawerVisible = ref(false)
+const distributionLoading = ref(false)
+const stockInDrawerVisible = ref(false)
+const stockInData = ref([])
+const stockInLoading = ref(false)
+const stockOutDrawerVisible = ref(false)
+const stockOutData = ref([])
+const stockOutLoading = ref(false)
+
+const router = useRouter()
 
 const pieChartOption = computed(() => {
-  const data = tableData.value.map(item => ({
-    name: item.name,
-    value: item.current_stock
+  // 按大类聚合展示，避免每个耗材一个扇区
+  const data = distributionData.value.map(item => ({
+    name: item.category_name,
+    value: item.total_quantity
   }))
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
@@ -343,7 +479,7 @@ const pieChartOption = computed(() => {
       emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
       data: data.length > 0 ? data : [{ name: '暂无数据', value: 1 }]
     }],
-    color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']
+    color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#14b8a6', '#6366f1', '#ec4899']
   }
 })
 
@@ -386,13 +522,20 @@ const loadInventory = async () => {
     stats.value = {
       ...sd,
       totalTypes: response.total,
-      lowStockCount: response.data.filter(item => item.current_stock < 10).length
+      lowStockCount: sd.lowStockCount || 0
     }
     
-    // 加载低库存数据
-    lowStockData.value = response.data
-      .filter(item => item.current_stock < (item.safety_stock || 10))
-      .slice(0, 5)
+    // 加载低库存数据（使用后端真实告警数）
+    try {
+      const alertsResponse = await request.get('/consumables/stock/alerts')
+      const alertData = alertsResponse.data || []
+      lowStockData.value = alertData.slice(0, 5)
+      stats.value.lowStockCount = alertsResponse.count || alertData.length
+    } catch (e) {
+      lowStockData.value = response.data
+        .filter(item => item.current_stock < (item.safety_stock || 5))
+        .slice(0, 5)
+    }
     
     // 加载最近动态
     const activitiesResponse = await request.get('/consumables/stock/activities', { 
@@ -407,21 +550,102 @@ const loadInventory = async () => {
   }
 }
 
+const loadDistribution = async () => {
+  try {
+    const response = await request.get('/consumables/stock/distribution')
+    distributionData.value = response.data || []
+  } catch (error) {
+    console.error('加载库存分布失败:', error)
+  }
+}
+
+const openAlertDrawer = async () => {
+  alertDrawerVisible.value = true
+  try {
+    const response = await request.get('/consumables/stock/alerts')
+    alertList.value = response.data || []
+  } catch (error) {
+    console.error('加载告警明细失败:', error)
+  }
+}
+
+// 第八轮新增：3 个抽屉打开函数（含本月日期参数）
+const getMonthStart = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+const openDistributionDrawer = async () => {
+  distributionDrawerVisible.value = true
+  distributionLoading.value = true
+  try {
+    const r = await request.get('/consumables/stock/distribution')
+    distributionData.value = r.data || []
+  } catch (e) {
+    console.error('加载库存分布失败', e)
+    ElMessage.error('加载库存分布失败')
+  } finally {
+    distributionLoading.value = false
+  }
+}
+
+const openStockInDrawer = async () => {
+  stockInDrawerVisible.value = true
+  stockInLoading.value = true
+  try {
+    const r = await request.get('/stock-in', { params: { start_date: getMonthStart(), limit: 200 } })
+    stockInData.value = r.data || []
+  } catch (e) {
+    console.error('加载本月入库失败', e)
+    ElMessage.error('加载本月入库失败')
+  } finally {
+    stockInLoading.value = false
+  }
+}
+
+const openStockOutDrawer = async () => {
+  stockOutDrawerVisible.value = true
+  stockOutLoading.value = true
+  try {
+    const r = await request.get('/stock-out', { params: { start_date: getMonthStart(), limit: 200 } })
+    stockOutData.value = r.data || []
+  } catch (e) {
+    console.error('加载本月出库失败', e)
+    ElMessage.error('加载本月出库失败')
+  } finally {
+    stockOutLoading.value = false
+  }
+}
+
+const viewStockInRecord = (row) => {
+  router.push({ path: '/stock-in', query: { record: row.record_code } })
+}
+
+const viewStockOutRecord = (row) => {
+  router.push({ path: '/stock-out', query: { record: row.record_code } })
+}
+
+const goAlertList = () => {
+  // 跳转到耗材管理页并带上告警筛选
+  const router = useRouter()
+  router.push({ path: '/consumables', query: { alert: '1' } })
+}
+
 const getStockType = (stock) => {
   if (stock === 0) return 'danger'
-  if (stock < 10) return 'warning'
+  if (stock < 5) return 'warning'
   return 'success'
 }
 
 const getStockStatusType = (row) => {
   if (row.current_stock === 0) return 'danger'
-  if (row.current_stock < (row.safety_stock || 10)) return 'warning'
+  if (row.current_stock < (row.safety_stock || 5)) return 'warning'
   return 'success'
 }
 
 const getStockStatusText = (row) => {
   if (row.current_stock === 0) return '缺货'
-  if (row.current_stock < (row.safety_stock || 10)) return '预警'
+  if (row.current_stock < (row.safety_stock || 5)) return '预警'
   return '充足'
 }
 
@@ -451,6 +675,7 @@ const loadTrendData = async () => {
 onMounted(() => {
   loadInventory()
   loadTrendData()
+  loadDistribution()
 })
 </script>
 
@@ -828,6 +1053,42 @@ onMounted(() => {
 
 .empty-state p {
   margin: 12px 0;
+  font-size: 14px;
+}
+
+.alert-card {
+  cursor: pointer;
+}
+
+.alert-card:hover {
+  border: 1px solid #ef4444;
+}
+
+.alert-drawer-toolbar {
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 第八轮新增：可点击统计卡 + 抽屉样式 */
+.clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.drawer-footer {
+  margin-top: 16px;
+  text-align: right;
+}
+
+.drawer-summary {
+  padding: 0 0 12px 0;
+  color: #606266;
   font-size: 14px;
 }
 </style>

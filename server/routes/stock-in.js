@@ -12,6 +12,18 @@ const { authenticate } = require('../middleware/auth')
 const { generateStockInCode, generateProductCode } = require('../utils/codeGenerator')
 const { createStockIn } = require('../validations')
 
+/**
+ * 去掉 Excel 表头 key 末尾的 *（模板必填标识），生成兼容字段字典
+ * 如 {'名称*': 'A4纸', ...} → {'名称': 'A4纸', ...}
+ */
+function stripStarKeys(row) {
+  const r = {}
+  Object.keys(row).forEach(k => {
+    r[k.replace(/\*$/, '')] = row[k]
+  })
+  return r
+}
+
 const router = express.Router()
 router.use(authenticate)
 
@@ -39,7 +51,13 @@ const upload = multer({
 
 /**
  * 解析上传的 Excel 文件，返回耗材列表（不写入数据库）
+ * 同时解析"归属"和"分类"字段：
+ *   - 归属按 name 查 ownership_id
+ *   - 分类按 "大类/小类" 拆分，分别查 categories 取 id
+ * 若归属/分类在数据库中找不到，对应行进入 invalid_items，不影响其他行解析。
+ *
  * POST /api/stock-in/parse-excel
+ * 返回：{ data: { items: [...], invalid_items: [...] } }
  */
 router.post('/parse-excel', upload.single('file'), async (req, res) => {
   if (!req.file) {
@@ -50,27 +68,135 @@ router.post('/parse-excel', upload.single('file'), async (req, res) => {
     const workbook = XLSX.readFile(req.file.path)
     const sheetName = workbook.SheetNames[0]
     const worksheet = workbook.Sheets[sheetName]
-    const data = XLSX.utils.sheet_to_json(worksheet)
+    const data = XLSX.utils.sheet_to_json(worksheet, { defval: '' })
 
     if (data.length === 0) {
       fs.unlinkSync(req.file.path)
       return res.status(400).json({ message: 'Excel文件为空' })
     }
 
-    const items = data.map((row, index) => ({
-      consumable_name: row['名称'] || row['name'] || '',
-      spec_model: row['规格型号'] || row['spec_model'] || '',
-      quantity: parseInt(row['数量'] || row['quantity'] || 0),
-      unit: row['单位'] || row['unit'] || '个',
-      unit_price: parseFloat(row['单价'] || row['unit_price'] || 0),
-      reporter: row['提报人'] || row['reporter'] || req.user?.username || ''
-    }))
+    // 预读所有归属与分类，构建查找字典
+    // 注：categories/ownership_options 表当前未启用 is_deleted 字段
+    const ownerships = await db.query(
+      'SELECT id, name FROM ownership_options'
+    )
+    const ownershipByName = new Map(ownerships.map(o => [o.name, o.id]))
+
+    const allCats = await db.query(
+      'SELECT id, name, parent_id FROM categories'
+    )
+    const bigCats = allCats.filter(c => c.parent_id === 0 || c.parent_id === null)
+    const smallCats = allCats.filter(c => c.parent_id !== 0 && c.parent_id !== null)
+    const bigByName = new Map(bigCats.map(c => [c.name, c]))
+
+    const items = []
+    const invalid_items = []
+
+    data.forEach((rawRow, index) => {
+      const row = stripStarKeys(rawRow)
+      const consumable_name = (row['名称'] || row['name'] || '').toString().trim()
+      const ownership_name = (row['归属'] || row['ownership'] || '').toString().trim()
+      const category_path = (row['分类'] || row['category'] || '').toString().trim()
+
+      const baseItem = {
+        consumable_name,
+        spec_model: (row['规格型号'] || row['spec_model'] || '').toString(),
+        quantity: parseInt(row['数量'] || row['quantity'] || 0),
+        unit: (row['单位'] || row['unit'] || '个').toString(),
+        unit_price: parseFloat(row['单价'] || row['unit_price'] || 0),
+        reporter: (row['提报人'] || row['reporter'] || req.user?.username || '').toString()
+      }
+
+      // 必填校验：耗材名称
+      if (!consumable_name) {
+        invalid_items.push({
+          row: index + 2,
+          ...baseItem,
+          ownership_name,
+          category_path,
+          error: '耗材名称为空'
+        })
+        return
+      }
+
+      // 归属解析（按 name 查 id）
+      let ownership_id = null
+      if (ownership_name) {
+        ownership_id = ownershipByName.get(ownership_name)
+        if (!ownership_id) {
+          invalid_items.push({
+            row: index + 2,
+            ...baseItem,
+            ownership_name,
+            category_path,
+            error: `归属"${ownership_name}"在系统中不存在，请先在归属管理中添加`
+          })
+          return
+        }
+      }
+
+      // 分类解析（按 "大类/小类" 拆分）
+      let category_id = null
+      let big_category_name = null
+      let small_category_name = null
+      if (category_path) {
+        const parts = category_path.split('/').map(s => s.trim())
+        if (parts.length !== 2 || !parts[0] || !parts[1]) {
+          invalid_items.push({
+            row: index + 2,
+            ...baseItem,
+            ownership_name,
+            category_path,
+            error: '分类格式错误（应为"大类/小类"，例如"办公耗材/A4纸"）'
+          })
+          return
+        }
+        big_category_name = parts[0]
+        small_category_name = parts[1]
+        const big = bigByName.get(big_category_name)
+        if (!big) {
+          invalid_items.push({
+            row: index + 2,
+            ...baseItem,
+            ownership_name,
+            category_path,
+            error: `大类"${big_category_name}"在系统中不存在，请先在分类管理中添加`
+          })
+          return
+        }
+        const small = smallCats.find(c => c.parent_id === big.id && c.name === small_category_name)
+        if (!small) {
+          invalid_items.push({
+            row: index + 2,
+            ...baseItem,
+            ownership_name,
+            category_path,
+            error: `小类"${small_category_name}"不存在于"${big_category_name}"下`
+          })
+          return
+        }
+        category_id = small.id
+      }
+
+      items.push({
+        ...baseItem,
+        ownership_name: ownership_name || null,
+        ownership_id,
+        category_path: category_path || null,
+        big_category_name,
+        small_category_name,
+        category_id
+      })
+    })
 
     // 删除临时文件
     fs.unlinkSync(req.file.path)
 
-    logger.info('解析入库Excel', { count: items.length })
-    res.json({ message: '解析成功', data: items })
+    logger.info('解析入库Excel', { count: items.length, invalid: invalid_items.length })
+    res.json({
+      message: '解析成功',
+      data: { items, invalid_items }
+    })
   } catch (error) {
     logger.error('解析Excel失败', { error: error.message, stack: error.stack })
     if (req.file && fs.existsSync(req.file.path)) {
@@ -149,10 +275,26 @@ router.post('/', createStockIn, (req, res, next) => {
 
         if (!consumableId) {
           // 新建耗材（传入事务连接，确保批量时不生成重复编号）
+          // 解析归属：ownership_id 存在则查字典取 name（同时写 ownership 与 ownership_id 字段，保持外键 + 文本双轨）
+          let finalOwnership = '部门公用'
+          let finalOwnershipId = null
+          if (item.ownership_id) {
+            const [oRows] = await connection.execute(
+              'SELECT id, name FROM ownership_options WHERE id = ?',
+              [item.ownership_id]
+            )
+            if (oRows.length > 0) {
+              finalOwnership = oRows[0].name
+              finalOwnershipId = oRows[0].id
+            }
+          }
+
           const productCode = await generateProductCode(0, connection)
           const insertSql = `
-            INSERT INTO consumables (product_code, name, spec_model, quantity, unit, unit_price, reporter, is_deleted)
-            VALUES (?, ?, ?, 0, ?, ?, ?, 0)
+            INSERT INTO consumables
+              (product_code, name, spec_model, quantity, unit, unit_price, reporter,
+               ownership, ownership_id, category_id, is_deleted)
+            VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0)
           `
           const insertResult = await connection.execute(insertSql, [
             productCode,
@@ -160,7 +302,10 @@ router.post('/', createStockIn, (req, res, next) => {
             item.spec_model || '',
             item.unit || '个',
             item.unit_price,
-            item.reporter || req.user?.username || ''
+            item.reporter || req.user?.username || '',
+            finalOwnership,
+            finalOwnershipId,
+            item.category_id || null
           ])
           consumableId = insertResult[0].insertId
         }
@@ -217,7 +362,8 @@ router.post('/', createStockIn, (req, res, next) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 20, keyword } = req.query
+    // 第八轮改动：新增 start_date / end_date 查询参数（前端工作台抽屉按本月筛选）
+    const { page = 1, limit = 20, keyword, start_date, end_date } = req.query
     const offset = (page - 1) * limit
 
     let sql = `
@@ -231,9 +377,23 @@ router.get('/', async (req, res) => {
     `
     const params = []
 
+    // 第八轮改动：以 WHERE 1=1 起始占位，便于后续 AND 拼接
+    sql += ' WHERE 1=1'
+    countSql += ' WHERE 1=1'
+
+    if (start_date) {
+      sql += ' AND sr.created_at >= ?'
+      countSql += ' AND sr.created_at >= ?'
+      params.push(`${start_date} 00:00:00`)
+    }
+    if (end_date) {
+      sql += ' AND sr.created_at <= ?'
+      countSql += ' AND sr.created_at <= ?'
+      params.push(`${end_date} 23:59:59`)
+    }
     if (keyword) {
-      sql += ' WHERE sr.record_code LIKE ? OR sr.supplier_name LIKE ?'
-      countSql += ' WHERE sr.record_code LIKE ? OR sr.supplier_name LIKE ?'
+      sql += ' AND (sr.record_code LIKE ? OR sr.supplier_name LIKE ?)'
+      countSql += ' AND (sr.record_code LIKE ? OR sr.supplier_name LIKE ?)'
       const searchParam = `%${keyword}%`
       params.push(searchParam, searchParam)
     }

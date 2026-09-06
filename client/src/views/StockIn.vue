@@ -217,6 +217,41 @@
               ¥{{ (scope.row.quantity * scope.row.unit_price).toFixed(2) }}
             </template>
           </el-table-column>
+          <el-table-column label="归属" width="140">
+            <template #default="scope">
+              <el-select
+                v-model="scope.row.ownership_id"
+                size="small"
+                placeholder="选择归属"
+                filterable
+                clearable
+                style="width: 100%"
+                @change="(val) => onOwnershipChange(scope.row, val)"
+              >
+                <el-option
+                  v-for="o in ownerships"
+                  :key="o.id"
+                  :label="o.name"
+                  :value="o.id"
+                />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="分类" min-width="220">
+            <template #default="scope">
+              <el-cascader
+                v-model="scope.row.category_cascader"
+                :options="categoryCascaderOptions"
+                :props="categoryCascaderProps"
+                size="small"
+                placeholder="选择分类（先大类后小类）"
+                filterable
+                clearable
+                style="width: 100%"
+                @change="(val) => onCategoryChange(scope.row, val)"
+              />
+            </template>
+          </el-table-column>
           <el-table-column label="提报人" width="120">
             <template #default="scope">
               <el-input
@@ -345,6 +380,27 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 未识别的 Excel 行弹窗 -->
+    <el-dialog
+      v-model="invalidDialogVisible"
+      title="未识别的 Excel 行"
+      width="80%"
+    >
+      <el-alert type="warning" :closable="false" show-icon style="margin-bottom: 16px;">
+        以下行因归属或分类未在系统中找到被跳过。请先在"分类管理 / 归属管理"中添加相应项，然后重新导出模板并导入。
+      </el-alert>
+      <el-table :data="invalidItems" stripe border>
+        <el-table-column prop="row" label="Excel 行" width="80" />
+        <el-table-column prop="consumable_name" label="耗材名称" min-width="140" />
+        <el-table-column prop="ownership_name" label="归属" width="120" />
+        <el-table-column prop="category_path" label="分类" min-width="180" />
+        <el-table-column prop="error" label="错误原因" min-width="240" />
+      </el-table>
+      <template #footer>
+        <el-button type="primary" @click="invalidDialogVisible = false">我知道了</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -368,6 +424,21 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const formRef = ref(null)
 const selectedRows = ref([])
+
+// 归属 / 分类字典（用于 selectedItems 表格内联下拉编辑）
+const ownerships = ref([])
+const categoryCascaderOptions = ref([])
+const categoryCascaderProps = {
+  value: 'id',
+  label: 'name',
+  children: 'children',
+  checkStrictly: true,
+  emitPath: false
+}
+
+// Excel 导入未识别行（弹窗展示）
+const invalidItems = ref([])
+const invalidDialogVisible = ref(false)
 
 // 二次确认删除
 const deleteConfirmVisible = ref(false)
@@ -590,26 +661,105 @@ const addManualItem = () => {
     unit: '个',
     quantity: 1,
     unit_price: 0,
-    reporter: userStore.user?.username || ''
+    reporter: userStore.user?.username || '',
+    ownership_id: null,
+    ownership_name: '',
+    category_id: null,
+    category_path: '',
+    big_category_name: '',
+    small_category_name: '',
+    category_cascader: null
   })
 }
 
+// 归属变化 → 同步展示名
+const onOwnershipChange = (row, val) => {
+  const o = ownerships.value.find(o => o.id === val)
+  row.ownership_name = o ? o.name : ''
+}
+
+// 分类 cascader 变化 → 同步 category_id 与展示路径
+const onCategoryChange = (row, val) => {
+  // emitPath: false 时 val 是小类 id
+  row.category_id = val || null
+  row.category_cascader = val || null
+  if (!val) {
+    row.category_path = ''
+    row.big_category_name = ''
+    row.small_category_name = ''
+    return
+  }
+  // 从 cascader options 中找出对应节点，构造 "大类/小类" 路径
+  let bigName = ''
+  let smallName = ''
+  for (const big of categoryCascaderOptions.value) {
+    const sub = (big.children || []).find(c => c.id === val)
+    if (sub) {
+      bigName = big.name
+      smallName = sub.name
+      break
+    }
+  }
+  row.big_category_name = bigName
+  row.small_category_name = smallName
+  row.category_path = bigName && smallName ? `${bigName}/${smallName}` : ''
+}
+
+// 加载归属与分类字典（用于 selectedItems 内联下拉）
+const loadOwnershipsAndCategories = async () => {
+  try {
+    const [oRes, cRes] = await Promise.all([
+      request.get('/ownerships'),
+      request.get('/categories')
+    ])
+    ownerships.value = (oRes.data || []).filter(o => !o.is_deleted)
+    categoryCascaderOptions.value = cRes.data || []
+  } catch (e) {
+    console.warn('加载归属/分类字典失败', e)
+  }
+}
+
 // Excel 导入成功回调
+// 后端响应结构：{ data: { items: [...], invalid_items: [...] } }
+//   - items：合法行，含 ownership_id / ownership_name / category_id / category_path
+//   - invalid_items：归属/分类未识别的行（不影响其他行）
 const handleExcelSuccess = (response) => {
-  if (response.data && response.data.length > 0) {
-    response.data.forEach(item => {
-      selectedItems.value.push({
-        consumable_name: item.consumable_name || '',
-        spec_model: item.spec_model || '',
-        unit: item.unit || '个',
-        quantity: item.quantity || 1,
-        unit_price: item.unit_price || 0,
-        reporter: item.reporter || userStore.user?.username || ''
-      })
+  const data = response.data || {}
+  const items = data.items || []
+  const invalid = data.invalid_items || []
+
+  // 把合法行加入已选列表
+  items.forEach(item => {
+    selectedItems.value.push({
+      consumable_name: item.consumable_name || '',
+      spec_model: item.spec_model || '',
+      unit: item.unit || '个',
+      quantity: item.quantity || 1,
+      unit_price: item.unit_price || 0,
+      reporter: item.reporter || userStore.user?.username || '',
+      ownership_id: item.ownership_id || null,
+      ownership_name: item.ownership_name || '',
+      category_id: item.category_id || null,
+      category_path: item.category_path || '',
+      big_category_name: item.big_category_name || '',
+      small_category_name: item.small_category_name || '',
+      // el-cascader 绑定的内部值（小类 id），与 category_id 一致
+      category_cascader: item.category_id || null
     })
-    ElMessage.success(`成功导入 ${response.data.length} 条耗材`)
-  } else {
+  })
+
+  // 提示与弹窗
+  if (items.length === 0 && invalid.length === 0) {
     ElMessage.warning('Excel中没有有效数据')
+    return
+  }
+  if (items.length > 0) {
+    ElMessage.success(`成功导入 ${items.length} 条耗材`)
+  }
+  if (invalid.length > 0) {
+    ElMessage.warning(`另有 ${invalid.length} 条因归属/分类无效被跳过`)
+    invalidItems.value = invalid
+    invalidDialogVisible.value = true
   }
 }
 
@@ -669,7 +819,9 @@ const handleSubmit = async () => {
         unit: item.unit || '个',
         quantity: item.quantity,
         unit_price: item.unit_price,
-        reporter: item.reporter || ''
+        reporter: item.reporter || '',
+        ownership_id: item.ownership_id || null,
+        category_id: item.category_id || null
       }))
 
       await request.post('/stock-in', {
@@ -1035,6 +1187,7 @@ const downloadPDF = async (row) => {
 
 onMounted(() => {
   loadStockInRecords()
+  loadOwnershipsAndCategories()
 })
 </script>
 

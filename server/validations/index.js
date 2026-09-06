@@ -18,7 +18,10 @@ const createConsumable = [
   body('quantity').isInt({ min: 0 }).withMessage('数量必须为非负整数'),
   body('unit').trim().isLength({ min: 1, max: 20 }).withMessage('单位1-20位'),
   body('unit_price').isFloat({ min: 0 }).withMessage('单价必须为非负数'),
-  body('reporter').trim().isLength({ min: 1, max: 50 }).withMessage('提报人1-50位')
+  body('reporter').trim().isLength({ min: 1, max: 50 }).withMessage('提报人1-50位'),
+  body('ownership_id').optional({ values: 'null' }).isInt({ min: 1 }).withMessage('归属无效'),
+  body('category_id').optional({ values: 'null' }).isInt({ min: 1 }).withMessage('分类无效'),
+  body('safety_stock').optional({ values: 'null' }).isInt({ min: 0 }).withMessage('安全库存必须为非负整数')
 ]
 
 // 入库单校验
@@ -31,7 +34,9 @@ const createStockIn = [
   body('items.*.unit').optional().trim().isLength({ min: 1, max: 20 }).withMessage('单位1-20位'),
   body('items.*.reporter').optional().trim().isLength({ max: 50 }).withMessage('提报人不超过50位'),
   body('items.*.quantity').isInt({ min: 1 }).withMessage('数量必须大于0'),
-  body('items.*.unit_price').isFloat({ min: 0 }).withMessage('单价必须为非负数')
+  body('items.*.unit_price').isFloat({ min: 0 }).withMessage('单价必须为非负数'),
+  body('items.*.ownership_id').optional({ values: 'null' }).isInt({ min: 1 }).withMessage('归属ID无效'),
+  body('items.*.category_id').optional({ values: 'null' }).isInt({ min: 1 }).withMessage('分类ID无效')
 ]
 
 // 出库单校验

@@ -1,9 +1,8 @@
 {
   "name": "xapiaihaocai-server",
-  "version": "1.0.0",
+  "version": "2.4.9",
   "description": "人工智能学院耗材出入库管理系统 - 后端服务",
   "main": "app.js",
-  "bin": "app.js",
   "pkg": {
     "scripts": [
       "app.js",
@@ -43,6 +42,7 @@
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
+    "exceljs": "^4.4.0",
     "express": "^4.18.2",
     "express-rate-limit": "^8.5.2",
     "express-validator": "^7.3.2",

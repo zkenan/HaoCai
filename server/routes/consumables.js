@@ -85,33 +85,69 @@ router.post('/restore/:id', async (req, res) => {
  */
 router.get('/', async (req, res) => {
   try {
-    const { page = 1, limit = 20, keyword } = req.query
+    const { page = 1, limit = 20, keyword, category_id, ownership_id, ownership, alert } = req.query
     const offset = (page - 1) * limit
 
-    // 使用别名明确指定需要的字段，避免total_price自动生成列干扰
+    // 使用别名明确指定需要的字段，LEFT JOIN categories 返回分类名与父级ID，避免total_price自动生成列干扰
     let sql = `SELECT 
-      id, 
-      product_code, 
-      name, 
-      spec_model, 
-      quantity, 
-      unit, 
-      unit_price,
-      reporter, 
-      created_at, 
-      updated_at 
-    FROM consumables WHERE is_deleted = 0`
-    let countSql = 'SELECT COUNT(*) as total FROM consumables WHERE is_deleted = 0'
+      c.id, 
+      c.product_code, 
+      c.name, 
+      c.spec_model, 
+      c.quantity, 
+      c.unit, 
+      c.unit_price,
+      c.reporter, 
+      c.category_id,
+      c.ownership,
+      c.ownership_id,
+      c.safety_stock,
+      c.created_at, 
+      c.updated_at,
+      cat.name AS category_name,
+      cat.parent_id AS category_parent_id,
+      oo.name AS ownership_name
+    FROM consumables c
+    LEFT JOIN categories cat ON c.category_id = cat.id
+    LEFT JOIN ownership_options oo ON c.ownership_id = oo.id
+    WHERE c.is_deleted = 0`
+    let countSql = 'SELECT COUNT(*) as total FROM consumables c WHERE c.is_deleted = 0'
     const params = []
 
     if (keyword) {
-      sql += ' AND (name LIKE ? OR product_code LIKE ?)'
-      countSql += ' AND (name LIKE ? OR product_code LIKE ?)'
+      sql += ' AND (c.name LIKE ? OR c.product_code LIKE ?)'
+      countSql += ' AND (c.name LIKE ? OR c.product_code LIKE ?)'
       const searchParam = `%${keyword}%`
       params.push(searchParam, searchParam)
     }
+    if (category_id) {
+      // 支持按小类或大类筛选：若给的是大类ID，则匹配其下所有小类
+      sql += ' AND (c.category_id = ? OR c.category_id IN (SELECT id FROM categories WHERE parent_id = ?))'
+      countSql += ' AND (c.category_id = ? OR c.category_id IN (SELECT id FROM categories WHERE parent_id = ?))'
+      params.push(category_id, category_id)
+    }
+    if (ownership_id) {
+      sql += ' AND c.ownership_id = ?'
+      countSql += ' AND c.ownership_id = ?'
+      params.push(ownership_id)
+    } else if (ownership) {
+      sql += ' AND c.ownership = ?'
+      countSql += ' AND c.ownership = ?'
+      params.push(ownership)
+    }
+    if (alert === '1') {
+      // 告警：当前库存低于安全库存 + 归属开关 need_replenish=1
+      // 与补货建议接口（stock/replenish）口径一致：无归属（ownership_id NULL）或归属关闭 need_replenish=0 的耗材不告警
+      sql += ' AND c.quantity < c.safety_stock AND oo.need_replenish = 1'
+      // countSql 需补 LEFT JOIN 才能引用 oo；替换占位串以保证幂等
+      countSql = countSql.replace(
+        'FROM consumables c WHERE',
+        'FROM consumables c LEFT JOIN ownership_options oo ON c.ownership_id = oo.id WHERE'
+      )
+      countSql += ' AND c.quantity < c.safety_stock AND oo.need_replenish = 1'
+    }
 
-    sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?'
+    sql += ' ORDER BY c.created_at DESC LIMIT ? OFFSET ?'
     params.push(parseInt(limit), parseInt(offset))
 
     const [results, countResults] = await Promise.all([
@@ -119,23 +155,9 @@ router.get('/', async (req, res) => {
       db.query(countSql, params.slice(0, -2))
     ])
 
-    // 确保返回的数据不包含total_price字段
-    const cleanResults = results.map(row => ({
-      id: row.id,
-      product_code: row.product_code,
-      name: row.name,
-      spec_model: row.spec_model,
-      quantity: row.quantity,
-      unit: row.unit,
-      unit_price: row.unit_price,
-      reporter: row.reporter,
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    }))
-
     res.json({
       message: '获取成功',
-      data: cleanResults,
+      data: results,
       total: countResults[0].total,
       page: parseInt(page),
       limit: parseInt(limit)
@@ -191,14 +213,26 @@ router.post('/', createConsumable, (req, res, next) => {
   }
   next()
 }, async (req, res) => {
-  const { name, spec_model, quantity, unit, unit_price, reporter } = req.body
+  const { name, spec_model, quantity, unit, unit_price, reporter, category_id, ownership_id, safety_stock } = req.body
 
   try {
     const productCode = await generateProductCode()
 
+    // 解析归属：优先 ownership_id，查字典得 name；无则默认部门公用
+    let finalOwnershipId = ownership_id || null
+    let finalOwnership = '部门公用'
+    if (finalOwnershipId) {
+      const orows = await db.query('SELECT name FROM ownership_options WHERE id = ?', [finalOwnershipId])
+      if (orows.length > 0) {
+        finalOwnership = orows[0].name
+      } else {
+        finalOwnershipId = null
+      }
+    }
+
     const sql = `
-      INSERT INTO consumables (product_code, name, spec_model, quantity, unit, unit_price, reporter)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO consumables (product_code, name, spec_model, quantity, unit, unit_price, reporter, category_id, ownership, ownership_id, safety_stock)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
 
     const result = await db.query(sql, [
@@ -208,7 +242,11 @@ router.post('/', createConsumable, (req, res, next) => {
       parseInt(quantity),
       unit,
       parseFloat(unit_price),
-      reporter
+      reporter,
+      category_id || null,
+      finalOwnership,
+      finalOwnershipId,
+      safety_stock !== undefined && safety_stock !== null ? parseInt(safety_stock) : 5
     ])
 
     logger.info('创建耗材', { id: result.insertId, name, productCode })
@@ -329,12 +367,24 @@ router.put('/:id', createConsumable, (req, res, next) => {
   }
   next()
 }, async (req, res) => {
-  const { name, spec_model, quantity, unit, unit_price, reporter } = req.body
+  const { name, spec_model, quantity, unit, unit_price, reporter, category_id, ownership_id, safety_stock } = req.body
 
   try {
+    // 解析归属：优先 ownership_id，查字典得 name；无则默认部门公用
+    let finalOwnershipId = ownership_id || null
+    let finalOwnership = '部门公用'
+    if (finalOwnershipId) {
+      const orows = await db.query('SELECT name FROM ownership_options WHERE id = ?', [finalOwnershipId])
+      if (orows.length > 0) {
+        finalOwnership = orows[0].name
+      } else {
+        finalOwnershipId = null
+      }
+    }
+
     const sql = `
       UPDATE consumables 
-      SET name = ?, spec_model = ?, quantity = ?, unit = ?, unit_price = ?, reporter = ?
+      SET name = ?, spec_model = ?, quantity = ?, unit = ?, unit_price = ?, reporter = ?, category_id = ?, ownership = ?, ownership_id = ?, safety_stock = ?
       WHERE id = ?
     `
 
@@ -345,6 +395,10 @@ router.put('/:id', createConsumable, (req, res, next) => {
       unit,
       parseFloat(unit_price),
       reporter,
+      category_id || null,
+      finalOwnership,
+      finalOwnershipId,
+      safety_stock !== undefined && safety_stock !== null ? parseInt(safety_stock) : 5,
       req.params.id
     ])
 
@@ -454,7 +508,7 @@ router.get('/stock/trends', async (req, res) => {
  */
 router.get('/stock/inventory', async (req, res) => {
   try {
-    const { page = 1, limit = 20, keyword } = req.query
+    const { page = 1, limit = 20, keyword, category_id, ownership_id, ownership, alert } = req.query
     const offset = (page - 1) * limit
 
     // 查询每个耗材的当前库存、累计入库和累计出库（排除已删除）
@@ -463,8 +517,13 @@ router.get('/stock/inventory', async (req, res) => {
         c.*,
         COALESCE(si.total_stock_in, 0) as total_stock_in,
         COALESCE(so.total_stock_out, 0) as total_stock_out,
-        (c.quantity + COALESCE(si.total_stock_in, 0) - COALESCE(so.total_stock_out, 0)) as current_stock
+        c.quantity as current_stock,
+        cat.name as category_name,
+        cat.parent_id as category_parent_id,
+        oo.name as ownership_name
       FROM consumables c
+      LEFT JOIN categories cat ON c.category_id = cat.id
+      LEFT JOIN ownership_options oo ON c.ownership_id = oo.id
       LEFT JOIN (
         SELECT
           si.consumable_id,
@@ -482,22 +541,51 @@ router.get('/stock/inventory', async (req, res) => {
       WHERE c.is_deleted = 0
     `
 
-    let countSql = 'SELECT COUNT(*) as total FROM consumables WHERE is_deleted = 0'
+    let countSql = 'SELECT COUNT(*) as total FROM consumables c WHERE c.is_deleted = 0'
     const params = []
 
     if (keyword) {
       sql += ' AND (c.name LIKE ? OR c.product_code LIKE ?)'
-      countSql += ' AND (name LIKE ? OR product_code LIKE ?)'
+      countSql += ' AND (c.name LIKE ? OR c.product_code LIKE ?)'
       const searchParam = `%${keyword}%`
       params.push(searchParam, searchParam)
+    }
+    if (category_id) {
+      // 支持按小类或大类筛选：若给的是大类ID，则匹配其下所有小类
+      sql += ' AND (c.category_id = ? OR c.category_id IN (SELECT id FROM categories WHERE parent_id = ?))'
+      countSql += ' AND (c.category_id = ? OR c.category_id IN (SELECT id FROM categories WHERE parent_id = ?))'
+      params.push(category_id, category_id)
+    }
+    if (ownership_id) {
+      sql += ' AND c.ownership_id = ?'
+      countSql += ' AND c.ownership_id = ?'
+      params.push(ownership_id)
+    } else if (ownership) {
+      sql += ' AND c.ownership = ?'
+      countSql += ' AND c.ownership = ?'
+      params.push(ownership)
+    }
+    if (alert === '1') {
+      // 告警：当前库存 < 安全库存 + 归属开关 need_replenish=1
+      // 与补货建议接口（stock/replenish）口径一致：无归属（ownership_id NULL）或归属关闭 need_replenish=0 的耗材不告警
+      sql += ' AND c.quantity < c.safety_stock AND oo.need_replenish = 1'
+      // countSql 需补 LEFT JOIN 才能引用 oo；替换占位串以保证幂等
+      countSql = countSql.replace(
+        'FROM consumables c WHERE',
+        'FROM consumables c LEFT JOIN ownership_options oo ON c.ownership_id = oo.id WHERE'
+      )
+      countSql += ' AND c.quantity < c.safety_stock AND oo.need_replenish = 1'
     }
 
     sql += ' ORDER BY c.created_at DESC LIMIT ? OFFSET ?'
     params.push(parseInt(limit), parseInt(offset))
 
+    // 为 countSql 去掉多余的条件拼接（countSql 与 sql 条件一致，但 countSql 无 LIMIT）
+    const countParams = params.slice(0, -2)
+
     const [results, countResults] = await Promise.all([
       db.query(sql, params),
-      db.query(countSql, params.slice(0, -2))
+      db.query(countSql, countParams)
     ])
 
     res.json({
@@ -519,12 +607,15 @@ router.get('/stock/inventory', async (req, res) => {
  */
 router.get('/stock/stats', async (req, res) => {
   try {
+    // 第八轮改动：本月入库/出库改为按 created_at >= 本月1号 计算，与前端 label 一致
+    // 沿用 MySQL DATE_FORMAT 表达式避免时区问题
+    // totalTypes / totalQuantity 仍为全库累计（label 为"库存总量"，而非"本月"）
     const statsSql = `
-      SELECT 
+      SELECT
         (SELECT COUNT(*) FROM consumables WHERE is_deleted = 0) as totalTypes,
         (SELECT COALESCE(SUM(quantity), 0) FROM consumables WHERE is_deleted = 0) as totalQuantity,
-        (SELECT COALESCE(SUM(quantity), 0) FROM stock_in_items) as totalStockIn,
-        (SELECT COALESCE(SUM(quantity), 0) FROM stock_out_items) as totalStockOut
+        (SELECT COALESCE(SUM(quantity), 0) FROM stock_in_items WHERE created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')) as totalStockIn,
+        (SELECT COALESCE(SUM(quantity), 0) FROM stock_out_items WHERE created_at >= DATE_FORMAT(NOW(), '%Y-%m-01')) as totalStockOut
     `
     const [stats] = await db.query(statsSql)
 
@@ -621,6 +712,93 @@ router.get('/stock/activities', async (req, res) => {
   } catch (error) {
     logger.error('获取最近动态失败', { error: error.message, stack: error.stack })
     res.status(500).json({ message: '获取最近动态失败' })
+  }
+})
+
+/**
+ * 获取库存分布（按大类聚合）
+ * GET /api/consumables/stock/distribution
+ */
+router.get('/stock/distribution', async (req, res) => {
+  try {
+    const sql = `
+      SELECT
+        COALESCE(cat.id, 0) as category_id,
+        COALESCE(cat.name, '未分类') as category_name,
+        COUNT(c.id) as consumable_count,
+        COALESCE(SUM(c.quantity), 0) as total_quantity
+      FROM consumables c
+      LEFT JOIN categories cat ON c.category_id = cat.id
+      WHERE c.is_deleted = 0
+      GROUP BY cat.id, cat.name
+      ORDER BY total_quantity DESC
+    `
+    const results = await db.query(sql)
+    res.json({ message: '获取成功', data: results })
+  } catch (error) {
+    logger.error('获取库存分布失败', { error: error.message, stack: error.stack })
+    res.status(500).json({ message: '获取失败' })
+  }
+})
+
+/**
+ * 获取补货建议（当前库存 < 安全库存的耗材）
+ * GET /api/consumables/stock/replenish
+ */
+router.get('/stock/replenish', async (req, res) => {
+  try {
+    const sql = `
+      SELECT
+        c.id, c.product_code, c.name, c.spec_model, c.unit,
+        c.quantity as current_stock,
+        c.safety_stock,
+        (c.safety_stock - c.quantity) as need_quantity,
+        oo.name as ownership_name,
+        cat.name as category_name
+      FROM consumables c
+      LEFT JOIN categories cat ON c.category_id = cat.id
+      LEFT JOIN ownership_options oo ON c.ownership_id = oo.id
+      WHERE c.is_deleted = 0
+        AND c.quantity < c.safety_stock
+        AND oo.need_replenish = 1
+      ORDER BY need_quantity DESC
+    `
+    const results = await db.query(sql)
+    res.json({ message: '获取成功', data: results, count: results.length })
+  } catch (error) {
+    logger.error('获取补货建议失败', { error: error.message, stack: error.stack })
+    res.status(500).json({ message: '获取失败' })
+  }
+})
+
+/**
+ * 获取单个耗材的库存流水（出入库明细时间线）
+ * GET /api/consumables/:id/flow
+ */
+router.get('/:id/flow', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id)
+    const inSql = `
+      SELECT 'in' as type, si.quantity, si.unit_price, sr.record_code, sr.stock_in_date as biz_date, sr.created_at
+      FROM stock_in_items si
+      LEFT JOIN stock_in_records sr ON si.stock_in_id = sr.id
+      WHERE si.consumable_id = ?
+    `
+    const outSql = `
+      SELECT 'out' as type, so.quantity, so.unit_price, sor.record_code, sor.stock_out_date as biz_date, sor.created_at
+      FROM stock_out_items so
+      LEFT JOIN stock_out_records sor ON so.stock_out_id = sor.id
+      WHERE so.consumable_id = ?
+    `
+    const [inRecords, outRecords] = await Promise.all([
+      db.query(inSql, [id]),
+      db.query(outSql, [id])
+    ])
+    const flow = [...inRecords, ...outRecords].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    res.json({ message: '获取成功', data: flow })
+  } catch (error) {
+    logger.error('获取库存流水失败', { error: error.message, stack: error.stack })
+    res.status(500).json({ message: '获取失败' })
   }
 })
 

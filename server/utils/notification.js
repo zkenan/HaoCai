@@ -3,18 +3,21 @@ const db = require('../config/db')
 
 async function checkStockAlert() {
   try {
-    const threshold = parseInt(process.env.STOCK_ALERT_THRESHOLD || '10')
+    // 使用每种耗材独立的安全库存阈值（默认5），当前库存直接取 c.quantity
+    // 口径与补货建议接口（stock/replenish）一致：只有归属开关 need_replenish=1 的归属底下的耗材才告警。
+    // LEFT JOIN 意味着无归属（c.ownership_id NULL）时 oo.need_replenish 为 NULL，= 1 不匹配 → 自动排除（决策点 1：无归属不告警）
     const lowStock = await db.query(
-      `SELECT c.id, c.name, c.quantity, c.product_code,
-              COALESCE(si.total_in, 0) as total_in,
-              COALESCE(so.total_out, 0) as total_out,
-              (c.quantity + COALESCE(si.total_in, 0) - COALESCE(so.total_out, 0)) as current_stock
+      `SELECT c.id, c.name, c.quantity as current_stock, c.product_code,
+              c.safety_stock, c.unit, c.ownership,
+              c.ownership_id,
+              oo.need_replenish,
+              (c.safety_stock - c.quantity) as need_quantity
        FROM consumables c
-       LEFT JOIN (SELECT consumable_id, SUM(quantity) as total_in FROM stock_in_items GROUP BY consumable_id) si ON c.id = si.consumable_id
-       LEFT JOIN (SELECT consumable_id, SUM(quantity) as total_out FROM stock_out_items GROUP BY consumable_id) so ON c.id = so.consumable_id
-       WHERE (c.quantity + COALESCE(si.total_in, 0) - COALESCE(so.total_out, 0)) < ?
-       ORDER BY current_stock ASC`,
-      [threshold]
+       LEFT JOIN ownership_options oo ON c.ownership_id = oo.id
+       WHERE c.is_deleted = 0
+         AND c.quantity < c.safety_stock
+         AND oo.need_replenish = 1
+       ORDER BY need_quantity DESC`
     )
 
     if (lowStock.length === 0) {
@@ -38,9 +41,8 @@ async function checkStockAlert() {
 
 async function sendWebhook(url, alerts) {
   try {
-    const threshold = parseInt(process.env.STOCK_ALERT_THRESHOLD || '10')
-    const content = alerts.map(a => `- ${a.name}: 当前${a.current_stock}件`).join('\n')
-    const message = `⚠️ 库存预警\n\n以下耗材库存不足${threshold}件：\n${content}`
+    const content = alerts.map(a => `- ${a.name}: 当前${a.current_stock}件（安全库存${a.safety_stock}）`).join('\n')
+    const message = `⚠️ 库存预警\n\n以下耗材库存不足安全库存：\n${content}`
 
     const https = require('https')
     const http = require('http')

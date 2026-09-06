@@ -1,13 +1,9 @@
 const express = require('express')
-const XLSX = require('xlsx')
-
-const path = require('path')
-const fs = require('fs')
 
 const logger = require('../utils/logger')
 const db = require('../config/db')
 const { authenticate } = require('../middleware/auth')
-const { numberToChineseMoney } = require('../utils/codeGenerator')
+const { buildStockInTemplate } = require('../utils/excelTemplate')
 
 const router = express.Router()
 router.use(authenticate)
@@ -15,43 +11,39 @@ router.use(authenticate)
 /**
  * 下载Excel导入模板
  * GET /api/files/template
+ *
+ * 模板字段（含 Excel 数据验证下拉）：
+ *   名称* | 规格型号 | 数量* | 单位 | 单价 | 提报人 | 归属* | 分类*
+ *   - 归属列下拉 = 所有 ownership_options.name
+ *   - 分类列下拉 = 所有"大类/小类"完整路径
+ *
+ * 附带 Sheet：
+ *   - "分类清单"：所有分类（大类+小类），辅助查阅
+ *   - "归属清单"：所有归属（含补货建议开关），辅助查阅
  */
-router.get('/template', (req, res) => {
+router.get('/template', async (req, res) => {
   try {
-    // 创建工作簿
-    const workbook = XLSX.utils.book_new()
-    
-    // 创建示例数据
-    const data = [
-      ['名称', '规格型号', '数量', '单位', '单价', '提报人'],
-      ['网线', 'CAT6 1米', 100, '根', 5.5, '张老师'],
-      ['内存', 'DDR4 8GB', 20, '条', 180.0, '李老师'],
-      ['硒鼓', 'HP 88A', 10, '个', 250.0, '王老师'],
-      ['键盘', '有线键盘', 30, '个', 45.0, '赵老师'],
-      ['鼠标', '有线鼠标', 30, '个', 25.0, '刘老师']
-    ]
-    
-    const worksheet = XLSX.utils.aoa_to_sheet(data)
-    
-    // 设置列宽
-    worksheet['!cols'] = [
-      { wch: 15 },
-      { wch: 20 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 10 },
-      { wch: 12 }
-    ]
-    
-    XLSX.utils.book_append_sheet(workbook, worksheet, '耗材导入模板')
-    
-    // 生成Excel文件
-    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
-    
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    // 使用encodeURIComponent编码中文文件名，避免HTTP头中的无效字符
+    // 读取当前所有分类与归属（每次导出取最新，添加新归属/分类后重新导出即可生效）
+    // 注：categories/ownership_options 表当前未启用 is_deleted 软删，过滤由前端/业务层处理
+    const categories = await db.query(
+      'SELECT id, name, parent_id, sort FROM categories ORDER BY parent_id ASC, sort ASC, id ASC'
+    )
+    const ownerships = await db.query(
+      'SELECT id, name, sort, need_replenish FROM ownership_options ORDER BY sort ASC, id ASC'
+    )
+
+    const workbook = buildStockInTemplate(categories, ownerships)
+    const excelBuffer = await workbook.xlsx.writeBuffer()
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
     const fileName = encodeURIComponent('耗材导入模板.xlsx')
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${fileName}`)
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileName}"; filename*=UTF-8''${fileName}`
+    )
     res.send(excelBuffer)
   } catch (error) {
     logger.error('生成模板失败', { error: error.message, stack: error.stack })
@@ -67,12 +59,12 @@ router.get('/stock-in/:id/data', async (req, res) => {
   try {
     // 获取入库单信息
     const recordSql = `
-      SELECT sr.* 
-      FROM stock_in_records sr 
+      SELECT sr.*
+      FROM stock_in_records sr
       WHERE sr.id = ?
     `
     const recordResults = await db.query(recordSql, [req.params.id])
-    
+
     if (recordResults.length === 0) {
       return res.status(404).json({ message: '入库单不存在' })
     }
@@ -108,12 +100,12 @@ router.get('/stock-out/:id/data', async (req, res) => {
   try {
     // 获取出库单信息
     const recordSql = `
-      SELECT sr.* 
-      FROM stock_out_records sr 
+      SELECT sr.*
+      FROM stock_out_records sr
       WHERE sr.id = ?
     `
     const recordResults = await db.query(recordSql, [req.params.id])
-    
+
     if (recordResults.length === 0) {
       return res.status(404).json({ message: '出库单不存在' })
     }
@@ -122,9 +114,9 @@ router.get('/stock-out/:id/data', async (req, res) => {
 
     // 获取出库单明细
     const itemsSql = `
-      SELECT si.*, c.product_code, c.name, c.spec_model, c.unit 
-      FROM stock_out_items si 
-      LEFT JOIN consumables c ON si.consumable_id = c.id 
+      SELECT si.*, c.product_code, c.name, c.spec_model, c.unit
+      FROM stock_out_items si
+      LEFT JOIN consumables c ON si.consumable_id = c.id
       WHERE si.stock_out_id = ?
       ORDER BY si.id ASC
     `

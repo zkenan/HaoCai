@@ -33,6 +33,49 @@
             <el-button @click="loadConsumables">搜索</el-button>
           </template>
         </el-input>
+        <el-select
+          v-model="filterBigCategory"
+          placeholder="大类"
+          clearable
+          @change="onFilterBigChange"
+          style="width: 130px; margin-left: 12px"
+        >
+          <el-option
+            v-for="big in categoryTree"
+            :key="big.id"
+            :label="big.name"
+            :value="big.id"
+          />
+        </el-select>
+        <el-select
+          v-model="filterSmallCategory"
+          placeholder="小类（可选）"
+          clearable
+          :disabled="!filterBigCategory"
+          @change="onFilterSmallChange"
+          style="width: 150px; margin-left: 12px"
+        >
+          <el-option
+            v-for="child in filterChildren"
+            :key="child.id"
+            :label="child.name"
+            :value="child.id"
+          />
+        </el-select>
+        <el-select
+          v-model="filterOwnershipId"
+          placeholder="全部归属"
+          clearable
+          @change="loadConsumables"
+          style="width: 140px; margin-left: 12px"
+        >
+          <el-option
+            v-for="o in ownershipList"
+            :key="o.id"
+            :label="o.name"
+            :value="o.id"
+          />
+        </el-select>
         <el-tooltip content="E-编辑 Delete-删除" placement="top">
           <el-tag size="small" type="info" style="margin-left: 8px">快捷键</el-tag>
         </el-tooltip>
@@ -51,7 +94,23 @@
         <el-table-column prop="product_code" label="产品编号" width="150" sortable />
         <el-table-column prop="name" label="耗材名称" min-width="100" sortable show-overflow-tooltip />
         <el-table-column prop="spec_model" label="规格型号" min-width="100" sortable show-overflow-tooltip />
+        <el-table-column label="分类" width="110">
+          <template #default="scope">
+            {{ scope.row.category_name || '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="归属" width="100">
+          <template #default="scope">
+            <el-tag size="small" :type="ownershipTagType(scope.row.ownership_name)">{{ scope.row.ownership_name || scope.row.ownership || '部门公用' }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="quantity" label="数量" width="80" sortable />
+        <el-table-column prop="safety_stock" label="安全库存" width="90">
+          <template #default="scope">
+            <el-tag v-if="scope.row.quantity < scope.row.safety_stock" type="danger" size="small">{{ scope.row.safety_stock }}</el-tag>
+            <span v-else>{{ scope.row.safety_stock }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="unit" label="单位" width="60" />
         <el-table-column prop="unit_price" label="单价" width="130" sortable>
           <template #default="scope">
@@ -115,6 +174,51 @@
         <el-form-item label="规格型号" prop="spec_model">
           <el-input v-model="formData.spec_model" placeholder="请输入规格型号" />
         </el-form-item>
+        <el-form-item label="所属大类" prop="category_id">
+          <el-select
+            v-model="formBigCategory"
+            placeholder="请选择大类"
+            clearable
+            @change="onFormBigChange"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="big in categoryTree"
+              :key="big.id"
+              :label="big.name"
+              :value="big.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="所属小类（可选）">
+          <el-select
+            v-model="formSmallCategory"
+            placeholder="不选则该大类下全部"
+            clearable
+            :disabled="!formBigCategory"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="child in formChildren"
+              :key="child.id"
+              :label="child.name"
+              :value="child.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="归属范围" prop="ownership_id">
+          <el-select v-model="formData.ownership_id" placeholder="请选择归属" style="width: 100%">
+            <el-option
+              v-for="o in ownershipList"
+              :key="o.id"
+              :label="o.name"
+              :value="o.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="安全库存（低于此值告警）" prop="safety_stock">
+          <el-input-number v-model="formData.safety_stock" :min="0" style="width: 100%" />
+        </el-form-item>
         <el-form-item label="数量" prop="quantity">
           <el-input-number 
             v-model="formData.quantity" 
@@ -154,18 +258,27 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../store/user'
 import request from '../utils/api'
 
 const userStore = useUserStore()
+const route = useRoute()
 
 const loading = ref(false)
 const submitLoading = ref(false)
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const searchKeyword = ref('')
+const filterBigCategory = ref(null)
+const filterSmallCategory = ref(null)
+const filterOwnershipId = ref(null)
+const formBigCategory = ref(null)
+const formSmallCategory = ref(null)
+const categoryTree = ref([])
+const ownershipList = ref([])
 const tableData = ref([])
 const total = ref(0)
 const currentPage = ref(1)
@@ -227,8 +340,29 @@ const formData = reactive({
   quantity: 1,
   unit: '',
   unit_price: 0,
-  reporter: ''
+  reporter: '',
+  category_id: null,
+  ownership_id: null,
+  safety_stock: 5
 })
+
+const ownershipTagType = (ownership) => {
+  const map = {
+    '办公室': 'info',
+    '部门公用': 'success',
+    '教学实验': 'warning',
+    '项目专用': 'primary'
+  }
+  if (map[ownership]) return map[ownership]
+  // 自定义归属：按名称哈希分配颜色
+  const palette = ['primary', 'success', 'warning', 'danger', 'info']
+  let hash = 0
+  const s = String(ownership || '')
+  for (let i = 0; i < s.length; i++) {
+    hash = (hash * 31 + s.charCodeAt(i)) >>> 0
+  }
+  return palette[hash % palette.length]
+}
 
 const rules = {
   name: [{ required: true, message: '请输入产品名称', trigger: 'blur' }],
@@ -253,6 +387,17 @@ const loadConsumables = async () => {
     if (searchKeyword.value) {
       params.keyword = searchKeyword.value
     }
+    const catId = filterSmallCategory.value || filterBigCategory.value
+    if (catId) {
+      params.category_id = catId
+    }
+    if (filterOwnershipId.value) {
+      params.ownership_id = filterOwnershipId.value
+    }
+    // 从工作台告警跳转过来的筛选
+    if (route.query.alert === '1') {
+      params.alert = '1'
+    }
     
     const response = await request.get('/consumables', { params })
     
@@ -260,7 +405,8 @@ const loadConsumables = async () => {
     tableData.value = response.data.map(item => ({
       ...item,
       quantity: Number(item.quantity) || 0,
-      unit_price: Number(item.unit_price) || 0
+      unit_price: Number(item.unit_price) || 0,
+      safety_stock: Number(item.safety_stock) || 0
     }))
     
     total.value = response.total
@@ -272,6 +418,57 @@ const loadConsumables = async () => {
   }
 }
 
+const loadCategories = async () => {
+  try {
+    const response = await request.get('/categories')
+    categoryTree.value = response.data || []
+  } catch (error) {
+    console.error('加载分类失败:', error)
+  }
+}
+
+const loadOwnerships = async () => {
+  try {
+    const response = await request.get('/ownerships')
+    ownershipList.value = response.data || []
+  } catch (error) {
+    console.error('加载归属失败:', error)
+  }
+}
+
+// 筛选栏：大类选中后，联动出该大类下的小类
+const filterChildren = computed(() => {
+  if (!filterBigCategory.value) return []
+  const big = categoryTree.value.find(b => b.id === filterBigCategory.value)
+  return big ? (big.children || []) : []
+})
+
+const onFilterBigChange = () => {
+  filterSmallCategory.value = null
+  loadConsumables()
+}
+
+const onFilterSmallChange = () => {
+  loadConsumables()
+}
+
+// 表单：大类选中后，联动出该大类下的小类
+const formChildren = computed(() => {
+  if (!formBigCategory.value) return []
+  const big = categoryTree.value.find(b => b.id === formBigCategory.value)
+  return big ? (big.children || []) : []
+})
+
+const onFormBigChange = () => {
+  formSmallCategory.value = null
+}
+
+// 默认归属（优先"部门公用"）
+const defaultOwnershipId = () => {
+  const def = ownershipList.value.find(o => o.name === '部门公用')
+  return def ? def.id : null
+}
+
 const showAddDialog = () => {
   isEdit.value = false
   Object.assign(formData, {
@@ -281,8 +478,13 @@ const showAddDialog = () => {
     quantity: 1,
     unit: '',
     unit_price: 0,
-    reporter: ''
+    reporter: '',
+    category_id: null,
+    ownership_id: defaultOwnershipId(),
+    safety_stock: 5
   })
+  formBigCategory.value = null
+  formSmallCategory.value = null
   dialogVisible.value = true
 }
 
@@ -295,8 +497,24 @@ const showEditDialog = (row) => {
     quantity: row.quantity,
     unit: row.unit,
     unit_price: row.unit_price,
-    reporter: row.reporter
+    reporter: row.reporter,
+    category_id: row.category_id || null,
+    ownership_id: row.ownership_id || null,
+    safety_stock: Number(row.safety_stock) || 5
   })
+  // 分类回显：若 category_parent_id > 0 说明是小类，否则是大类
+  if (row.category_id) {
+    if (row.category_parent_id) {
+      formBigCategory.value = row.category_parent_id
+      formSmallCategory.value = row.category_id
+    } else {
+      formBigCategory.value = row.category_id
+      formSmallCategory.value = null
+    }
+  } else {
+    formBigCategory.value = null
+    formSmallCategory.value = null
+  }
   dialogVisible.value = true
 }
 
@@ -305,6 +523,9 @@ const handleSubmit = async () => {
   
   await formRef.value.validate(async (valid) => {
     if (!valid) return
+    
+    // 同步分类：优先小类，否则大类
+    formData.category_id = formSmallCategory.value || formBigCategory.value || null
     
     submitLoading.value = true
     try {
@@ -373,6 +594,8 @@ const handleUndo = async () => {
 
 onMounted(() => {
   loadConsumables()
+  loadCategories()
+  loadOwnerships()
   document.addEventListener('keydown', handleKeyDown)
 })
 

@@ -21,6 +21,10 @@
             <el-icon><DataAnalysis /></el-icon>
             <span>工作台</span>
           </el-menu-item>
+          <el-menu-item index="/replenish">
+            <el-icon><ShoppingCart /></el-icon>
+            <span>补货建议</span>
+          </el-menu-item>
         </div>
         
         <div class="menu-group">
@@ -41,6 +45,10 @@
         
         <div class="menu-group" v-if="userStore.user?.role === 'admin'">
           <div class="menu-label">系统</div>
+          <el-menu-item index="/categories">
+            <el-icon><Collection /></el-icon>
+            <span>分类管理</span>
+          </el-menu-item>
           <el-menu-item index="/users">
             <el-icon><User /></el-icon>
             <span>用户管理</span>
@@ -158,7 +166,7 @@
 import { computed, ref, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Search, DataAnalysis, Goods, Upload, Download, Lock, FolderChecked, User, Document } from '@element-plus/icons-vue'
+import { Search, DataAnalysis, Goods, Upload, Download, Lock, FolderChecked, User, Document, ShoppingCart, Collection } from '@element-plus/icons-vue'
 import { useUserStore } from '../store/user'
 import request from '../utils/api'
 
