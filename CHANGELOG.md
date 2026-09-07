@@ -15,6 +15,9 @@ tag 与版本号保持一致（如 `xapiaihaocai:2.4.9`）。
 - 历史开发计划 `PLAN.md` 归档至 `docs/archive/PLAN.md`
 - `PROJECT_CONTEXT.md` / `CONVENTIONS.md` / `AGENTS.md` 版本标记更新至 v2.4.9
 - `.gitignore` 移除 `package-lock.json`，纳入 client/ 与 server/ 两个 lock 文件以锁定依赖版本
+- 归档早期裸机部署脚本 `deploy-docker.sh` / `deploy-linux.sh` / `install-docker.sh` 至 `docs/archive/`
+- 根 `package.json` 移除 `deploy:docker`、`deploy:linux` 两个脚本入口
+- `docker-compose.yml` 增加 `build` 配置，修复新设备 clone 后无本地镜像导致无法启动的问题
 
 ---
 

@@ -1,5 +1,8 @@
 services:
   app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: xapiaihaocai:2.4.9
     container_name: xapiaihaocai
     restart: always

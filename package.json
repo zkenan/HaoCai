@@ -7,9 +7,7 @@
     "dev": "concurrently \"cd server && npm run dev\" \"cd client && npm run dev\"",
     "install-all": "cd server && npm install && cd ../client && npm install",
     "build": "cd client && npm run build",
-    "start": "cd server && npm start",
-    "deploy:linux": "sudo ./deploy-linux.sh",
-    "deploy:docker": "./deploy-docker.sh"
+    "start": "cd server && npm start"
   },
   "keywords": [
     "耗材管理",

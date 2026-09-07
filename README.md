@@ -33,21 +33,34 @@ cp .env.example .env
 vim .env
 
 # 3. 启动服务
+#    首次启动会用项目根目录的 Dockerfile 从源码构建镜像
+#    （前端编译 + 后端依赖安装，约需几分钟），构建完成后打上 xapiaihaocai:2.4.9 标签
 docker compose up -d
 
 # 4. 访问系统
 # http://服务器IP:13001
 ```
 
+> **首次启动说明**：`docker-compose.yml` 同时配置了 `build` 与 `image`。
+> `git clone` 下来的新设备本地没有 `xapiaihaocai:2.4.9` 镜像，Docker 会自动从源码构建；
+> 已经存在该镜像的机器会直接复用本地镜像，不会重复构建。
+> 源码更新后需要重新构建时执行 `docker compose build`（加 `--no-cache` 可完全重建）。
+
 ### 开发环境
 
 ```bash
-# 安装依赖
+# 安装依赖（依次安装 server/ 与 client/ 的依赖）
 npm run install-all
 
-# 启动开发服务器
+# 准备环境变量（已有 .env 可跳过）
+cp .env.example .env
+
+# 启动开发服务器（后端 :3000 + 前端 :8080，前端已配置 /api 代理）
 npm run dev
 ```
+
+> 开发环境不依赖 Docker，但需要自行准备一个可访问的 MySQL 实例，
+> 并在根目录 `.env` 中填好连接信息（后端通过 `server/knexfile.js` 读取）。
 
 ## 项目结构
 
@@ -123,6 +136,9 @@ docker compose down
 
 # 重启服务
 docker compose restart
+
+# 重新构建镜像（源码更新后执行；加 --no-cache 可完全重建）
+docker compose build
 ```
 
 ## 数据库自动升级
