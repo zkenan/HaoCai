@@ -8,6 +8,16 @@ tag 与版本号保持一致（如 `xapiaihaocai:2.4.9`）。
 
 ---
 
+## [Unreleased]
+
+### Changed
+- 仓库清理：删除 `client/.gitignore`（0 字节空文件）、`server/.gitignore`（与根目录重复）
+- 历史开发计划 `PLAN.md` 归档至 `docs/archive/PLAN.md`
+- `PROJECT_CONTEXT.md` / `CONVENTIONS.md` / `AGENTS.md` 版本标记更新至 v2.4.9
+- `.gitignore` 移除 `package-lock.json`，纳入 client/ 与 server/ 两个 lock 文件以锁定依赖版本
+
+---
+
 ## [2.4.9] - 2026-09-04
 
 ### Added
